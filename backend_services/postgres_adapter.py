@@ -45,7 +45,8 @@ def build_postgres_dsn() -> str:
     dbname = os.getenv("SD_DB_NAME", "secretaria_digital")
     user = os.getenv("SD_DB_USER", "postgres")
     password = os.getenv("SD_DB_PASSWORD", "")
+    extras = "sslmode=require gssencmode=disable"
 
     if password:
-        return f"host={host} port={port} dbname={dbname} user={user} password={password}"
-    return f"host={host} port={port} dbname={dbname} user={user}"
+        return f"host={host} port={port} dbname={dbname} user={user} password={password} {extras}"
+    return f"host={host} port={port} dbname={dbname} user={user} {extras}"
