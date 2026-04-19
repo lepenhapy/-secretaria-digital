@@ -1,0 +1,28 @@
+
+=================================== ERRORS ====================================
+______________________ ERROR collecting test_api_app.py _______________________
+Users\Usuario\Desktop\Secretaria Digital\tests\test_api_app.py:5: in <module>
+    from backend_api.app import app
+Users\Usuario\Desktop\Secretaria Digital\backend_api\app.py:333: in <module>
+    @app.post("/files/upload")
+     ^^^^^^^^^^^^^^^^^^^^^^^^^
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\routing.py:1450: in decorator
+    self.add_api_route(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\routing.py:1386: in add_api_route
+    route = route_class(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\routing.py:949: in __init__
+    self.dependant = get_dependant(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\dependencies\utils.py:311: in get_dependant
+    param_details = analyze_param(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\dependencies\utils.py:535: in analyze_param
+    ensure_multipart_is_installed()
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\dependencies\utils.py:120: in ensure_multipart_is_installed
+    raise RuntimeError(multipart_not_installed_error) from None
+E   RuntimeError: Form data requires "python-multipart" to be installed. 
+E   You can install "python-multipart" with: 
+E   
+E   pip install python-multipart
+=========================== short test summary info ===========================
+ERROR Users\Usuario\Desktop\Secretaria Digital\tests\test_api_app.py - Runtim...
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 22.76s

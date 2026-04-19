@@ -1,0 +1,17 @@
+\i 001_create_identity_tables.sql
+\i 002_create_resources_table.sql
+\i 003_create_contracts_table.sql
+\i 004_create_schedule_slots_table.sql
+\i 005_create_messages_table.sql
+\i 006_create_operational_cases_table.sql
+\i 007_create_files_evidences_and_file_access_tables.sql
+\i 008_create_billings_table.sql
+\i 009_create_approvals_table.sql
+\i 010_create_audit_events_table.sql
+\i 011_create_whatsapp_sessions_table.sql
+\i 012_create_events_table.sql
+\i 013_create_case_messages_table.sql
+\i 014_create_reimbursements_table.sql
+\i 015_seed_initial_roles.sql
+\i 016_extend_irmaos_registration_mensalidade.sql
+\i 017_create_boletos_processados.sql

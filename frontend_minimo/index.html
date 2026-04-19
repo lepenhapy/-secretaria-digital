@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SD - Uso guiado</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container guided-layout">
+      <header class="hero guided-hero">
+        <div>
+          <p class="eyebrow">Secretaria Digital</p>
+          <h1>Painel simples</h1>
+          <p class="subtitle">Um passo de cada vez.</p>
+        </div>
+        <div class="status-panel">
+          <div class="status-chip" id="authStatusChip">Não autenticado</div>
+          <div class="status-meta" id="authStatusMeta">Faça login para começar.</div>
+          <div class="last-action" id="lastActionBox">Última ação: nenhuma</div>
+        </div>
+      </header>
+
+      <section class="guide-bar card compact">
+        <div class="guide-step active" id="guideStepLogin">1. Entrar</div>
+        <div class="guide-step" id="guideStepContract">2. Contrato</div>
+        <div class="guide-step" id="guideStepReimbursement">3. Reembolso</div>
+      </section>
+
+      <section class="next-action card highlight-card">
+        <div class="section-header">
+          <div>
+            <h2>Próxima ação</h2>
+            <p>O sistema vai sugerir o que fazer agora.</p>
+          </div>
+        </div>
+        <div class="next-action-text" id="nextActionText">Faça login para começar.</div>
+      </section>
+
+      <section class="card" id="loginSection">
+        <div class="section-header">
+          <div>
+            <h2>Entrar no sistema</h2>
+            <p>Digite seu email e sua senha.</p>
+          </div>
+        </div>
+        <div class="grid two">
+          <label>
+            Endereço da API
+            <input id="apiBaseUrl" type="text" value="http://127.0.0.1:8001" />
+          </label>
+          <label>
+            Email
+            <input id="email" type="email" placeholder="seu email" />
+          </label>
+          <label>
+            Senha
+            <input id="password" type="password" placeholder="sua senha" />
+          </label>
+        </div>
+        <div class="actions big-actions">
+          <button id="loginBtn" class="primary-action">Entrar</button>
+          <button id="meBtn" class="secondary">Ver meus dados</button>
+        </div>
+        <div class="response-card success" id="authResponseCard">
+          <div class="response-title">Retorno</div>
+          <pre id="authOutput" class="output"></pre>
+        </div>
+      </section>
+
+      <section class="card" id="contractsSection">
+        <div class="section-header">
+          <div>
+            <h2>Contrato</h2>
+            <p>Primeiro crie e depois acompanhe o contrato.</p>
+          </div>
+          <div class="inline-badge" id="contractBadge">Aguardando</div>
+        </div>
+
+        <div class="simple-summary" id="contractSummaryVisual">Nenhum contrato selecionado.</div>
+
+        <div class="grid two">
+          <label>
+            Número da loja
+            <input id="lojaId" type="number" value="1" />
+          </label>
+          <label>
+            Número do templo
+            <input id="temploId" type="number" value="1" />
+          </label>
+          <label>
+            Regra do encontro
+            <input id="regraRecorrencia" type="text" value="primeira segunda" />
+          </label>
+          <label>
+            Hora de início
+            <input id="horaInicioSessao" type="text" value="20:00" />
+          </label>
+          <label>
+            Hora de fim
+            <input id="horaFimSessao" type="text" value="22:00" />
+          </label>
+          <label>
+            Data de início
+            <input id="vigenciaInicio" type="text" value="2026-04-01" />
+          </label>
+          <label>
+            Data final
+            <input id="vigenciaFim" type="text" value="2026-12-31" />
+          </label>
+          <label>
+            Número do contrato
+            <input id="contractId" type="number" />
+          </label>
+          <label>
+            Observação
+            <input id="contractObservation" type="text" placeholder="se quiser escrever algo" />
+          </label>
+        </div>
+
+        <div class="actions wrap big-actions">
+          <button id="createContractBtn" class="primary-action">Criar contrato</button>
+          <button id="getContractBtn" class="secondary">Consultar contrato</button>
+          <button id="submitContractBtn">Enviar para análise</button>
+          <button id="approveContractBtn">Aprovar</button>
+          <button id="rejectContractBtn" class="danger">Rejeitar</button>
+          <button id="activateContractBtn">Ativar</button>
+          <button id="validateConflictBtn" class="secondary">Verificar conflito</button>
+        </div>
+
+        <details class="details-box">
+          <summary>Ver detalhes técnicos</summary>
+          <div class="response-card success" id="contractCreateCard">
+            <div class="response-title">Criação</div>
+            <pre id="createContractOutput" class="output slim"></pre>
+          </div>
+          <div class="response-card" id="contractResponseCard">
+            <div class="response-title">Resposta detalhada</div>
+            <pre id="contractOutput" class="output"></pre>
+          </div>
+        </details>
+      </section>
+
+      <section class="card" id="reimbursementsSection">
+        <div class="section-header">
+          <div>
+            <h2>Reembolso</h2>
+            <p>Use esta parte para criar, aprovar e pagar o reembolso.</p>
+          </div>
+          <div class="inline-badge" id="reimbursementBadge">Aguardando</div>
+        </div>
+
+        <div class="simple-summary" id="reimbursementSummaryVisual">Nenhum reembolso selecionado.</div>
+
+        <div class="grid two">
+          <label>
+            Número do caso
+            <input id="caseId" type="number" value="123" />
+          </label>
+          <label>
+            Categoria
+            <input id="reimbursementCategory" type="text" value="agape" />
+          </label>
+          <label>
+            Valor pedido
+            <input id="reimbursementAmount" type="text" value="150.00" />
+          </label>
+          <label>
+            Número do irmão
+            <input id="reimbursementIrmaoId" type="number" />
+          </label>
+          <label>
+            Número do reembolso
+            <input id="reimbursementId" type="number" />
+          </label>
+          <label>
+            Valor aprovado ou pago
+            <input id="reimbursementApprovedAmount" type="text" value="150.00" />
+          </label>
+          <label>
+            Observação do financeiro
+            <input id="reimbursementObservation" type="text" placeholder="se quiser escrever algo" />
+          </label>
+        </div>
+
+        <div class="actions wrap big-actions">
+          <button id="createReimbursementBtn" class="primary-action">Criar reembolso</button>
+          <button id="getReimbursementBtn" class="secondary">Consultar reembolso</button>
+          <button id="approveReimbursementBtn">Aprovar</button>
+          <button id="rejectReimbursementBtn" class="danger">Rejeitar</button>
+          <button id="payReimbursementBtn">Marcar como pago</button>
+        </div>
+
+        <details class="details-box">
+          <summary>Ver detalhes técnicos</summary>
+          <div class="response-card" id="reimbursementResponseCard">
+            <div class="response-title">Resposta detalhada</div>
+            <pre id="reimbursementOutput" class="output"></pre>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secretaria Digital</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- Hamburguer (mobile) -->
+<button class="hamburger" id="hamburger" onclick="toggleSidebar()">
+  <span></span><span></span><span></span>
+</button>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+<div class="layout">
+
+  <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+  <aside class="sidebar" id="sidebar">
+
+    <div class="brand">
+      <div class="brand-icon">SD</div>
+      <div>
+        <div class="brand-title">Secretaria Digital</div>
+        <div class="brand-sub">Gestão da Loja</div>
+      </div>
+    </div>
+
+    <!-- Bloco de autenticação -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Acesso</div>
+
+      <div id="formLogin">
+        <input class="sb-input" type="text"     id="apiUrl"   value="http://127.0.0.1:8001" placeholder="URL da API" />
+        <input class="sb-input" type="email"    id="email"    placeholder="Seu e-mail" />
+        <input class="sb-input" type="password" id="password" placeholder="Senha" />
+        <button class="btn-login" id="loginBtn">Entrar</button>
+        <div class="sb-msg" id="loginMsg"></div>
+        <button class="btn-criar-conta" id="abrirCadastroBtn">Criar conta</button>
+      </div>
+
+      <div id="blocoUsuario" style="display:none">
+        <div class="user-card">
+          <div class="user-avatar" id="userAvatar">?</div>
+          <div>
+            <div class="user-name"  id="userName">—</div>
+            <div class="user-cargo" id="userCargoLabel">—</div>
+          </div>
+        </div>
+        <button class="btn-logout" id="logoutBtn">Sair</button>
+      </div>
+    </div>
+
+    <!-- Lista de cargos (visível só após login) -->
+    <div class="sidebar-section grow" id="cargoSection" style="display:none">
+      <div class="sidebar-label">Módulos</div>
+      <nav class="cargo-nav" id="modulosNav"></nav>
+      <div class="sidebar-label" style="margin-top:14px">Cargos</div>
+      <nav class="cargo-nav" id="cargoNav"></nav>
+    </div>
+
+    <!-- Rodapé -->
+    <div class="sidebar-footer">
+      <button onclick="window.print()" class="btn-print">⎙ Imprimir esta página</button>
+    </div>
+
+  </aside>
+
+  <!-- ═══════════════════ ÁREA PRINCIPAL ═══════════════════ -->
+  <main class="main" id="main">
+
+    <!-- Tela pré-login -->
+    <div id="preLoginView" class="prelogin-view">
+      <div class="prelogin-symbol">
+
+        <!-- Imagem principal (carrega da internet) -->
+        <img id="masonicImg"
+             src="https://s.calendarr.com/upload/datas/si/mb/simbolo-do-macom_c.jpg"
+             alt="Símbolo Maçônico"
+             class="masonic-img"
+             onerror="document.getElementById('masonicImg').style.display='none';
+                      document.getElementById('masonicSvg').style.display='block'" />
+
+        <!-- SVG fallback (exibido se a imagem falhar) -->
+        <svg id="masonicSvg" viewBox="0 0 200 205" xmlns="http://www.w3.org/2000/svg"
+             class="masonic-svg" style="display:none">
+          <!-- Esquadro: ângulo reto em baixo ao centro, braços NW e NE -->
+          <line x1="100" y1="172" x2="38"  y2="110" stroke="#1a3a5c" stroke-width="10" stroke-linecap="square"/>
+          <line x1="100" y1="172" x2="162" y2="110" stroke="#1a3a5c" stroke-width="10" stroke-linecap="square"/>
+          <!-- Compasso: dobradiça no topo, pernas descendo -->
+          <line x1="100" y1="22"  x2="33"  y2="175" stroke="#1a3a5c" stroke-width="9"  stroke-linecap="round"/>
+          <line x1="100" y1="22"  x2="167" y2="175" stroke="#1a3a5c" stroke-width="9"  stroke-linecap="round"/>
+          <!-- Arco inferior do compasso -->
+          <path d="M 42,168 Q 100,195 158,168" stroke="#1a3a5c" stroke-width="7" fill="none" stroke-linecap="round"/>
+          <!-- Pino/dobradiça -->
+          <circle cx="100" cy="22"  r="7" fill="#1a3a5c"/>
+          <!-- Pontas do compasso -->
+          <circle cx="33"  cy="175" r="5" fill="#1a3a5c"/>
+          <circle cx="167" cy="175" r="5" fill="#1a3a5c"/>
+          <!-- G central -->
+          <text x="100" y="118" text-anchor="middle" dominant-baseline="middle"
+                fill="#1a3a5c" font-size="40" font-weight="bold"
+                font-family="Georgia, 'Times New Roman', serif">G</text>
+        </svg>
+
+      </div>
+      <div class="prelogin-label">Secretaria Digital</div>
+      <div class="prelogin-sub">Faça login para acessar o sistema</div>
+    </div>
+
+    <!-- Estado inicial (após login, sem cargo selecionado) -->
+    <div id="homeView" class="home-view" style="display:none">
+      <div class="home-hero">
+        <div class="home-badge">Secretaria Digital</div>
+        <h1>Painel de Cargos e Funções</h1>
+        <p>Selecione um cargo na barra lateral para ver suas responsabilidades e as funcionalidades disponíveis no sistema.</p>
+      </div>
+
+      <div class="home-cards" id="homeCargoGrid"></div>
+    </div>
+
+    <!-- Visão de cadastro de irmãos -->
+    <div id="irmaoView" style="display:none"></div>
+
+    <!-- Visão de um cargo específico -->
+    <div id="cargoView" style="display:none">
+
+      <header class="cargo-header" id="cargoHeader"></header>
+
+      <section class="content-section" id="responsSection">
+        <h2 class="section-title">Responsabilidades</h2>
+        <div class="cards-grid" id="responsCards"></div>
+      </section>
+
+      <section class="content-section" id="funcsSection">
+        <h2 class="section-title">Funcionalidades no Sistema</h2>
+        <div class="cards-grid" id="funcsCards"></div>
+      </section>
+
+    </div>
+
+  </main>
+</div>
+
+<!-- Modal de cadastro -->
+<div class="modal-overlay" id="modalCadastroOverlay" onclick="fecharCadastro()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title">Criar conta</div>
+      <button class="modal-close" onclick="fecharCadastro()">✕</button>
+    </div>
+
+    <!-- Passo 1: Formulário -->
+    <div id="cadastroForm">
+      <div class="modal-body">
+        <div>
+          <div class="modal-label">Nome completo</div>
+          <input class="modal-input" id="reg_nome" type="text" placeholder="Seu nome completo" />
+        </div>
+        <div>
+          <div class="modal-label">Nome de usuário</div>
+          <input class="modal-input" id="reg_usuario" type="text" placeholder="Como será exibido no sistema" />
+        </div>
+        <div>
+          <div class="modal-label">E-mail</div>
+          <input class="modal-input" id="reg_email" type="email" placeholder="seu@email.com" />
+        </div>
+        <div>
+          <div class="modal-label">Senha</div>
+          <input class="modal-input" id="reg_senha" type="password" placeholder="Mínimo 8 caracteres" />
+        </div>
+        <div>
+          <div class="modal-label">Confirmar senha</div>
+          <input class="modal-input" id="reg_confirma" type="password" placeholder="Repita a senha" />
+        </div>
+        <pre class="modal-result" id="cadastroMsg" style="display:none"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="func-btn neutral" onclick="fecharCadastro()">Cancelar</button>
+        <button class="func-btn primary" id="cadastroBtn" onclick="registrar()">Criar conta</button>
+      </div>
+    </div>
+
+    <!-- Passo 2: Confirmação enviada -->
+    <div id="cadastroConfirmado" style="display:none">
+      <div class="modal-body" style="align-items:center; text-align:center; padding:36px 22px">
+        <div style="font-size:52px">📧</div>
+        <div style="font-size:18px; font-weight:700; margin-top:12px">Verifique seu e-mail</div>
+        <div style="color:#64748b; margin-top:8px; line-height:1.6">
+          Enviamos um link de confirmação para<br/>
+          <strong id="cadastroEmailEnviado"></strong>.<br/><br/>
+          Clique no link do e-mail para ativar sua conta.
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content:center">
+        <button class="func-btn primary" onclick="fecharCadastro()">Entendido</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de ação -->
+<div class="modal-overlay" id="modalOverlay" onclick="fecharModal()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">Ação</div>
+      <button class="modal-close" onclick="fecharModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

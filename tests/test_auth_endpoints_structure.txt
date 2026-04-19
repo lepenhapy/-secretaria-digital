@@ -1,0 +1,6 @@
+Endpoints mínimos de autenticação implementados:
+- POST /auth/login
+- GET /auth/me
+
+Ambos dependem de get_current_actor.
+Uso atual: HTTP Basic Auth.

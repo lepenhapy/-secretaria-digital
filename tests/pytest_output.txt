@@ -1,0 +1,124 @@
+...........................F                                             [100%]
+================================== FAILURES ===================================
+____________________ test_mark_reimbursement_paid_success _____________________
+
+    def test_mark_reimbursement_paid_success():
+>       response = client.post(
+            "/reimbursements/654/pay",
+            json={
+                "valor_aprovado": "150.00",
+                "observacao_financeiro": "Pago"
+            },
+        )
+
+Users\Usuario\Desktop\Secretaria Digital\tests\test_api_app.py:174: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\testclient.py:546: in post
+    return super().post(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\httpx\_client.py:1144: in post
+    return self.request(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\testclient.py:445: in request
+    return super().request(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\httpx\_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\httpx\_client.py:914: in send
+    response = self._send_handling_auth(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\httpx\_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\httpx\_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\httpx\_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\testclient.py:348: in handle_request
+    raise exc
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\testclient.py:345: in handle_request
+    portal.call(self.app, scope, receive, send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\anyio\from_thread.py:334: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Python314\Lib\concurrent\futures\_base.py:450: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+Python314\Lib\concurrent\futures\_base.py:395: in __get_result
+    raise self._exception
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\anyio\from_thread.py:259: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\routing.py:680: in app
+    await route.handle(scope, receive, send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\routing.py:134: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\routing.py:120: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\routing.py:674: in app
+    raw_response = await run_endpoint_function(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\fastapi\routing.py:330: in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\starlette\concurrency.py:32: in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\anyio\to_thread.py:63: in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:2518: in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+Users\Usuario\Desktop\Secretaria Digital\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:1002: in run
+    result = context.run(func, *args)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reimbursement_id = 654
+payload = PayReimbursementInput(valor_aprovado=Decimal('150.00'), observacao_financeiro='Pago', data_pagamento=None)
+actor = Actor(user_id=1, loja_id=10, cargo='admin_principal')
+services = <test_api_app.FakeServices object at 0x000001AB704FEE40>
+
+    @app.post("/reimbursements/{reimbursement_id}/pay")
+    def pay_reimbursement(
+        reimbursement_id: int,
+        payload: PayReimbursementInput,
+        actor: Actor = Depends(get_current_actor),
+        services: CoreTransactionServices = Depends(get_services),
+    ):
+        try:
+>           services.mark_reimbursement_paid(
+                reembolso_id=reimbursement_id,
+                actor=actor,
+                valor_aprovado=payload.valor_aprovado,
+                observacao_financeiro=payload.observacao_financeiro,
+                data_pagamento=payload.data_pagamento,
+            )
+E           TypeError: FakeServices.mark_reimbursement_paid() got an unexpected keyword argument 'reembolso_id'
+
+Users\Usuario\Desktop\Secretaria Digital\backend_api\app.py:296: TypeError
+=========================== short test summary info ===========================
+FAILED Users\Usuario\Desktop\Secretaria Digital\tests\test_api_app.py::test_mark_reimbursement_paid_success
+1 failed, 27 passed in 1.71s
