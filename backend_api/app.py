@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend_api.dependencies import (
@@ -63,6 +64,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend_painel")
+if os.path.isdir(_frontend_dir):
+    app.mount("/painel", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
+
+
+@app.get("/", response_class=HTMLResponse)
+def root_redirect():
+    return '<meta http-equiv="refresh" content="0; url=/painel/index.html">'
 
 
 class CreateContractInput(BaseModel):

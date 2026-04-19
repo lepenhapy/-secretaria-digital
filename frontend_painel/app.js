@@ -336,7 +336,10 @@ const FUNCIONALIDADES = {
 let state = { token: null, usuario: null, cargoAtivo: null };
 
 function apiBase() {
-  return (document.getElementById('apiUrl')?.value || 'http://127.0.0.1:8001').replace(/\/$/, '');
+  const custom = document.getElementById('apiUrl')?.value?.trim();
+  if (custom) return custom.replace(/\/$/, '');
+  // When served from the same Railway host, use relative origin
+  return window.location.origin.replace(/\/$/, '');
 }
 
 async function api(method, path, body) {
