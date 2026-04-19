@@ -1,4 +1,5 @@
 import os
+import socket
 from contextlib import contextmanager
 
 import psycopg
@@ -39,13 +40,25 @@ class PostgresDatabase:
                 raise
 
 
+def _resolve_ipv4(host: str, port: int) -> str:
+    try:
+        results = socket.getaddrinfo(host, port, socket.AF_INET)
+        if results:
+            return results[0][4][0]
+    except Exception:
+        pass
+    return host
+
+
 def build_postgres_dsn() -> str:
     host = os.getenv("SD_DB_HOST", "localhost")
     port = os.getenv("SD_DB_PORT", "5432")
     dbname = os.getenv("SD_DB_NAME", "secretaria_digital")
     user = os.getenv("SD_DB_USER", "postgres")
     password = os.getenv("SD_DB_PASSWORD", "")
-    extras = "sslmode=require gssencmode=disable"
+
+    hostaddr = _resolve_ipv4(host, int(port))
+    extras = f"hostaddr={hostaddr} sslmode=require gssencmode=disable"
 
     if password:
         return f"host={host} port={port} dbname={dbname} user={user} password={password} {extras}"
