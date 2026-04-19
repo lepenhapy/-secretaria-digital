@@ -1,3 +1,4 @@
+import os
 import secrets
 
 from fastapi import Depends, HTTPException
@@ -9,10 +10,13 @@ from backend_services.core_transaction_services import CoreTransactionServices
 from backend_services.birthday_service import BirthdayService
 from backend_services.boleto_processor import BoletoProcessor
 from backend_services.calendar_service import CalendarService
+from backend_services.compras_service import ComprasService
 from backend_services.email_service import EmailService
 from backend_services.file_storage_service import FileStorageService
 from backend_services.postgres_adapter import PostgresDatabase, build_postgres_dsn
+from backend_services.rateio_service import RateioService
 from backend_services.registration_service import RegistrationService
+from backend_services.relatorios_service import RelatoriosService
 from backend_services.scheduler import Scheduler
 from backend_services.whatsapp_service import WhatsAppService
 
@@ -28,6 +32,9 @@ _birthday_service = None
 _boleto_processor = None
 _calendar_service = None
 _scheduler = None
+_compras_service = None
+_rateio_service = None
+_relatorios_service = None
 _basic_security = HTTPBasic()
 
 
@@ -59,7 +66,8 @@ def get_auth_service():
 def get_file_storage():
     global _file_storage
     if _file_storage is None:
-        _file_storage = FileStorageService("C:/Users/Usuario/Desktop/Secretaria Digital/storage_uploads")
+        base = os.getenv("STORAGE_DIR", os.path.join(os.path.dirname(__file__), "..", "storage_uploads"))
+        _file_storage = FileStorageService(base)
     return _file_storage
 
 
@@ -119,6 +127,31 @@ def get_scheduler():
     if _scheduler is None:
         _scheduler = Scheduler()
     return _scheduler
+
+
+def get_compras_service():
+    global _compras_service
+    if _compras_service is None:
+        _compras_service = ComprasService(
+            db=get_database(),
+            file_storage=get_file_storage(),
+            whatsapp_service=get_whatsapp_service(),
+        )
+    return _compras_service
+
+
+def get_rateio_service():
+    global _rateio_service
+    if _rateio_service is None:
+        _rateio_service = RateioService(db=get_database())
+    return _rateio_service
+
+
+def get_relatorios_service():
+    global _relatorios_service
+    if _relatorios_service is None:
+        _relatorios_service = RelatoriosService(db=get_database())
+    return _relatorios_service
 
 
 def get_current_actor(

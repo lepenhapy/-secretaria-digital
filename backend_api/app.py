@@ -16,14 +16,20 @@ from backend_api.dependencies import (
     get_birthday_service,
     get_boleto_processor,
     get_calendar_service,
+    get_compras_service,
     get_current_actor,
     get_database,
     get_file_storage,
+    get_rateio_service,
     get_registration_service,
+    get_relatorios_service,
     get_scheduler,
     get_services,
     get_whatsapp_service,
 )
+from backend_services.compras_service import ComprasService
+from backend_services.rateio_service import RateioService
+from backend_services.relatorios_service import RelatoriosService
 from backend_services.birthday_service import BirthdayService
 from backend_services.boleto_processor import BoletoProcessor
 from backend_services.calendar_service import CalendarService
@@ -819,6 +825,311 @@ def deletar_evento(
         raise HTTPException(status_code=503, detail="Google Calendar não configurado.")
     cal.deletar_evento(event_id)
     return {"status": "deleted"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  CENTROS DE CUSTO
+# ═══════════════════════════════════════════════════════════
+
+class CentroCustoInput(BaseModel):
+    loja_id: int
+    nome: str
+    descricao: Optional[str] = None
+
+class CentroCustoUpdateInput(BaseModel):
+    nome: str
+    descricao: Optional[str] = None
+    ativo: bool = True
+
+@app.post("/centros-custo", status_code=201)
+def criar_centro_custo(
+    payload: CentroCustoInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: RateioService = Depends(get_rateio_service),
+):
+    cid = svc.criar_centro_custo(payload.loja_id, payload.nome, payload.descricao)
+    return {"id": cid}
+
+@app.get("/centros-custo")
+def listar_centros_custo(
+    loja_id: int = Query(...),
+    apenas_ativos: bool = Query(default=True),
+    actor: Actor = Depends(get_current_actor),
+    svc: RateioService = Depends(get_rateio_service),
+):
+    return svc.listar_centros_custo(loja_id, apenas_ativos)
+
+@app.put("/centros-custo/{centro_id}")
+def atualizar_centro_custo(
+    centro_id: int,
+    payload: CentroCustoUpdateInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: RateioService = Depends(get_rateio_service),
+):
+    svc.atualizar_centro_custo(centro_id, payload.nome, payload.descricao, payload.ativo)
+    return {"status": "updated"}
+
+@app.delete("/centros-custo/{centro_id}")
+def deletar_centro_custo(
+    centro_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: RateioService = Depends(get_rateio_service),
+):
+    svc.deletar_centro_custo(centro_id)
+    return {"status": "deleted"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  REGRAS DE RATEIO
+# ═══════════════════════════════════════════════════════════
+
+class RateioItemInput(BaseModel):
+    centro_custo_id: int
+    percentual: float
+
+class RegraRateioInput(BaseModel):
+    loja_id: int
+    nome: str
+    descricao: Optional[str] = None
+    itens: list[RateioItemInput]
+
+class RegraRateioUpdateInput(BaseModel):
+    nome: str
+    descricao: Optional[str] = None
+    ativo: bool = True
+    itens: Optional[list[RateioItemInput]] = None
+
+@app.post("/regras-rateio", status_code=201)
+def criar_regra_rateio(
+    payload: RegraRateioInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: RateioService = Depends(get_rateio_service),
+):
+    try:
+        rid = svc.criar_regra(
+            payload.loja_id, payload.nome, payload.descricao,
+            [i.model_dump() for i in payload.itens], actor.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": rid}
+
+@app.get("/regras-rateio")
+def listar_regras_rateio(
+    loja_id: int = Query(...),
+    apenas_ativas: bool = Query(default=True),
+    actor: Actor = Depends(get_current_actor),
+    svc: RateioService = Depends(get_rateio_service),
+):
+    return svc.listar_regras(loja_id, apenas_ativas)
+
+@app.put("/regras-rateio/{regra_id}")
+def atualizar_regra_rateio(
+    regra_id: int,
+    payload: RegraRateioUpdateInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: RateioService = Depends(get_rateio_service),
+):
+    try:
+        itens = [i.model_dump() for i in payload.itens] if payload.itens is not None else None
+        svc.atualizar_regra(regra_id, payload.nome, payload.descricao, payload.ativo, itens)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "updated"}
+
+@app.delete("/regras-rateio/{regra_id}")
+def deletar_regra_rateio(
+    regra_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: RateioService = Depends(get_rateio_service),
+):
+    svc.deletar_regra(regra_id)
+    return {"status": "deleted"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  COMPRAS / REEMBOLSOS
+# ═══════════════════════════════════════════════════════════
+
+class CompraInput(BaseModel):
+    loja_id: int
+    evento: str
+    valor: float
+    regra_rateio_id: Optional[int] = None
+
+class CompraStatusInput(BaseModel):
+    status: str
+    observacao: Optional[str] = None
+
+class CompraVisibilidadeInput(BaseModel):
+    visivel: bool
+
+class NotifDestinatarioInput(BaseModel):
+    loja_id: int
+    evento_tipo: str
+    usuario_id: int
+    ativo: bool = True
+
+@app.post("/compras", status_code=201)
+async def criar_compra(
+    loja_id: int = Form(...),
+    evento: str = Form(...),
+    valor: float = Form(...),
+    regra_rateio_id: Optional[int] = Form(default=None),
+    arquivos: list[UploadFile] = File(default=[]),
+    actor: Actor = Depends(get_current_actor),
+    svc: ComprasService = Depends(get_compras_service),
+):
+    compra_id = svc.criar_compra(loja_id, actor.id, evento, valor, regra_rateio_id)
+    for arq in arquivos:
+        content = await arq.read()
+        mime = arq.content_type or ""
+        tipo = "foto" if mime.startswith("image/") else ("cupom" if "pdf" in mime else "arquivo")
+        import hashlib, uuid
+        sha = hashlib.sha256(content).hexdigest()
+        import os as _os
+        from pathlib import Path
+        base = _os.getenv("STORAGE_DIR", str(Path(__file__).parent.parent / "storage_uploads"))
+        Path(base).mkdir(parents=True, exist_ok=True)
+        ext = Path(arq.filename or "arquivo").suffix or ".bin"
+        fname = f"{uuid.uuid4().hex}{ext}"
+        fpath = str(Path(base) / str(loja_id) / fname)
+        Path(fpath).parent.mkdir(parents=True, exist_ok=True)
+        Path(fpath).write_bytes(content)
+        svc.adicionar_arquivo(compra_id, tipo, fpath, arq.filename, len(content), sha)
+    svc.notificar_nova_compra(compra_id, loja_id)
+    return {"id": compra_id}
+
+@app.get("/compras")
+def listar_compras(
+    loja_id: int = Query(...),
+    incluir_ocultos: bool = Query(default=False),
+    status: Optional[str] = Query(default=None),
+    data_inicio: Optional[str] = Query(default=None),
+    data_fim: Optional[str] = Query(default=None),
+    actor: Actor = Depends(get_current_actor),
+    svc: ComprasService = Depends(get_compras_service),
+):
+    return svc.listar_compras(loja_id, incluir_ocultos, status,
+                               data_inicio=data_inicio, data_fim=data_fim)
+
+@app.patch("/compras/{compra_id}/status")
+def atualizar_status_compra(
+    compra_id: int,
+    payload: CompraStatusInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: ComprasService = Depends(get_compras_service),
+):
+    if payload.status not in ("aprovado", "rejeitado", "pendente"):
+        raise HTTPException(status_code=400, detail="Status inválido.")
+    svc.atualizar_status(compra_id, payload.status, actor.id, payload.observacao)
+    return {"status": "updated"}
+
+@app.patch("/compras/{compra_id}/visibilidade")
+def atualizar_visibilidade_compra(
+    compra_id: int,
+    payload: CompraVisibilidadeInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: ComprasService = Depends(get_compras_service),
+):
+    svc.atualizar_visibilidade(compra_id, payload.visivel)
+    return {"status": "updated"}
+
+@app.get("/compras/{compra_id}/arquivo/{arquivo_id}")
+def download_arquivo_compra(
+    compra_id: int,
+    arquivo_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: ComprasService = Depends(get_compras_service),
+):
+    result = svc.arquivo_bytes(arquivo_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    data, nome = result
+    import io
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+# ── Notificações destinatários ────────────────────────────────────────────
+
+@app.get("/notificacoes/destinatarios")
+def listar_destinatarios(
+    loja_id: int = Query(...),
+    evento_tipo: Optional[str] = Query(default=None),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    from backend_services.postgres_adapter import PostgresDatabase
+    filters = ["nd.loja_id = %s"]
+    params: list = [loja_id]
+    if evento_tipo:
+        filters.append("nd.evento_tipo = %s")
+        params.append(evento_tipo)
+    where = " AND ".join(filters)
+    with db.transaction() as tx:
+        return tx.fetch_all(
+            f"""SELECT nd.*, u.nome AS usuario_nome, u.email
+                FROM notificacoes_destinatarios nd
+                JOIN usuarios u ON u.id = nd.usuario_id
+                WHERE {where} ORDER BY nd.evento_tipo, u.nome""",
+            params,
+        )
+
+@app.post("/notificacoes/destinatarios", status_code=201)
+def salvar_destinatario(
+    payload: NotifDestinatarioInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            """INSERT INTO notificacoes_destinatarios (loja_id, evento_tipo, usuario_id, ativo)
+               VALUES (%s,%s,%s,%s)
+               ON CONFLICT (loja_id, evento_tipo, usuario_id)
+               DO UPDATE SET ativo = EXCLUDED.ativo""",
+            (payload.loja_id, payload.evento_tipo, payload.usuario_id, payload.ativo),
+        )
+    return {"status": "saved"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  RELATÓRIOS
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/relatorios/tesouraria")
+def relatorio_tesouraria(
+    loja_id: int = Query(...),
+    data_inicio: Optional[str] = Query(default=None),
+    data_fim: Optional[str] = Query(default=None),
+    incluir_ocultos: bool = Query(default=False),
+    actor: Actor = Depends(get_current_actor),
+    svc: RelatoriosService = Depends(get_relatorios_service),
+):
+    return svc.tesouraria(loja_id, data_inicio, data_fim, incluir_ocultos)
+
+@app.get("/relatorios/mensalidades")
+def relatorio_mensalidades(
+    loja_id: int = Query(...),
+    data_inicio: Optional[str] = Query(default=None),
+    data_fim: Optional[str] = Query(default=None),
+    actor: Actor = Depends(get_current_actor),
+    svc: RelatoriosService = Depends(get_relatorios_service),
+):
+    return svc.mensalidades(loja_id, data_inicio, data_fim)
+
+@app.get("/relatorios/agenda")
+def relatorio_agenda(
+    loja_id: int = Query(...),
+    data_inicio: Optional[str] = Query(default=None),
+    data_fim: Optional[str] = Query(default=None),
+    actor: Actor = Depends(get_current_actor),
+    svc: RelatoriosService = Depends(get_relatorios_service),
+):
+    return svc.agenda(loja_id, data_inicio, data_fim)
 
 
 # ── WhatsApp: status da instância ─────────────────────────────────────────

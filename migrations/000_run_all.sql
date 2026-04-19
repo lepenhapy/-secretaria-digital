@@ -15,3 +15,4 @@
 \i 015_seed_initial_roles.sql
 \i 016_extend_irmaos_registration_mensalidade.sql
 \i 017_create_boletos_processados.sql
+\i 018_create_compras_rateio.sql

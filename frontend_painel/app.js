@@ -432,11 +432,10 @@ async function login() {
 }
 
 function mostrarView(id) {
-  ['preLoginView','homeView','cargoView','irmaoView'].forEach(v => {
+  ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView','relatoriosView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
-  if (id === 'homeView') document.getElementById('homeView').style.display = 'block';
 }
 
 function logout() {
@@ -473,20 +472,25 @@ function renderSidebar() {
   const modNav = document.getElementById('modulosNav');
   modNav.innerHTML = `
     <div class="sidebar-nav-module" id="nav-cadastro_irmao" onclick="abrirModulo('cadastro_irmao')">
-      <span style="font-size:15px">👥</span>
-      <span>Cadastro de Irmãos</span>
+      <span style="font-size:15px">👥</span><span>Cadastro de Irmãos</span>
     </div>
     <div class="sidebar-nav-module" id="nav-boletos" onclick="abrirModulo('boletos')">
-      <span style="font-size:15px">📄</span>
-      <span>Boletos</span>
+      <span style="font-size:15px">📄</span><span>Boletos</span>
     </div>
     <div class="sidebar-nav-module" id="nav-aniversarios" onclick="abrirModulo('aniversarios')">
-      <span style="font-size:15px">🎂</span>
-      <span>Aniversários</span>
+      <span style="font-size:15px">🎂</span><span>Aniversários</span>
     </div>
     <div class="sidebar-nav-module" id="nav-agenda" onclick="abrirModulo('agenda')">
-      <span style="font-size:15px">📅</span>
-      <span>Agenda</span>
+      <span style="font-size:15px">📅</span><span>Agenda</span>
+    </div>
+    <div class="sidebar-nav-module" id="nav-compras" onclick="abrirModulo('compras')">
+      <span style="font-size:15px">🧾</span><span>Compras / Reembolsos</span>
+    </div>
+    <div class="sidebar-nav-module" id="nav-rateio" onclick="abrirModulo('rateio')">
+      <span style="font-size:15px">⚖️</span><span>Centros de Custo</span>
+    </div>
+    <div class="sidebar-nav-module" id="nav-relatorios" onclick="abrirModulo('relatorios')">
+      <span style="font-size:15px">📊</span><span>Relatórios</span>
     </div>
   `;
 
@@ -513,10 +517,13 @@ function abrirModulo(id) {
   atualizarNavAtivo();
 
   const handlers = {
-    cadastro_irmao: () => { mostrarView('irmaoView');  renderIrmaoView(); },
-    boletos:        () => { mostrarView('irmaoView');  renderBoletosView(); },
-    aniversarios:   () => { mostrarView('irmaoView');  renderAniversariosView(); },
-    agenda:         () => { mostrarView('irmaoView');  renderAgendaView(); },
+    cadastro_irmao: () => { mostrarView('irmaoView');     renderIrmaoView(); },
+    boletos:        () => { mostrarView('irmaoView');     renderBoletosView(); },
+    aniversarios:   () => { mostrarView('irmaoView');     renderAniversariosView(); },
+    agenda:         () => { mostrarView('irmaoView');     renderAgendaView(); },
+    compras:        () => { mostrarView('comprasView');   renderComprasView(); },
+    rateio:         () => { mostrarView('rateioView');    renderRateioView(); },
+    relatorios:     () => { mostrarView('relatoriosView'); renderRelatoriosView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -1161,6 +1168,497 @@ function toggleSidebar(forceClose) {
   ov.classList.toggle('open', open);
   btn.classList.toggle('open', open);
 }
+
+// ═══════════════════════════════════════════════════════════
+//  COMPRAS / REEMBOLSOS
+// ═══════════════════════════════════════════════════════════
+
+async function renderComprasView() {
+  const el = document.getElementById('comprasView');
+  const loja = state.usuario?.loja_id || 1;
+  el.innerHTML = `
+    <div class="view-header">
+      <h1>Compras & Reembolsos</h1>
+      <button class="btn-primary" onclick="abrirNovaCompra()">+ Nova compra</button>
+    </div>
+    <div class="filtros-row">
+      <select id="filtroStatus" onchange="renderComprasView()">
+        <option value="">Todos os status</option>
+        <option value="pendente">Pendente</option>
+        <option value="aprovado">Aprovado</option>
+        <option value="rejeitado">Rejeitado</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+        <input type="checkbox" id="filtroOcultos" onchange="renderComprasView()"> Incluir ocultos
+      </label>
+    </div>
+    <div id="comprasLista"><div class="loading">Carregando…</div></div>
+  `;
+
+  const status = document.getElementById('filtroStatus')?.value || '';
+  const incl   = document.getElementById('filtroOcultos')?.checked ? 'true' : 'false';
+  try {
+    const params = `loja_id=${loja}&incluir_ocultos=${incl}` + (status ? `&status=${status}` : '');
+    const compras = await api('GET', `/compras?${params}`);
+    const lista = document.getElementById('comprasLista');
+    if (!compras.length) { lista.innerHTML = '<p class="empty-msg">Nenhuma compra encontrada.</p>'; return; }
+
+    lista.innerHTML = compras.map(c => `
+      <div class="compra-card status-${c.status}">
+        <div class="compra-top">
+          <span class="compra-evento">${c.evento}</span>
+          <span class="badge-status ${c.status}">${c.status}</span>
+          ${!c.visivel ? '<span class="badge-oculto">oculto</span>' : ''}
+        </div>
+        <div class="compra-meta">
+          <span>👤 ${c.usuario_nome}</span>
+          <span>💰 R$ ${parseFloat(c.valor).toFixed(2)}</span>
+          <span>📅 ${new Date(c.criado_em).toLocaleDateString('pt-BR')}</span>
+          ${c.regra_nome ? `<span>⚖️ ${c.regra_nome}</span>` : ''}
+        </div>
+        ${c.arquivos?.length ? `<div class="compra-arquivos">
+          ${c.arquivos.map(a => `<a href="${apiBase()}/compras/${c.id}/arquivo/${a.id}" target="_blank" class="arq-link">📎 ${a.nome_original || a.tipo}</a>`).join('')}
+        </div>` : ''}
+        ${c.observacao ? `<div class="compra-obs">💬 ${c.observacao}</div>` : ''}
+        <div class="compra-acoes">
+          ${c.status === 'pendente' ? `
+            <button class="btn-sm success" onclick="aprovarCompra(${c.id})">Aprovar</button>
+            <button class="btn-sm danger"  onclick="rejeitarCompra(${c.id})">Rejeitar</button>
+          ` : ''}
+          <button class="btn-sm neutral" onclick="toggleVisibilidade(${c.id}, ${!c.visivel})">${c.visivel ? 'Ocultar' : 'Mostrar'}</button>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    document.getElementById('comprasLista').innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+async function abrirNovaCompra() {
+  const loja = state.usuario?.loja_id || 1;
+  let regras = [];
+  try { regras = await api('GET', `/regras-rateio?loja_id=${loja}`); } catch(_) {}
+
+  abrirModal('Nova Compra / Reembolso', `
+    <div class="form-group"><label>Evento / Descrição</label>
+      <input class="modal-input" id="nc_evento" placeholder="Ex: Ágape - Sessão Magna" /></div>
+    <div class="form-group"><label>Valor (R$)</label>
+      <input class="modal-input" id="nc_valor" type="number" step="0.01" placeholder="0,00" /></div>
+    <div class="form-group"><label>Regra de rateio (opcional)</label>
+      <select class="modal-input" id="nc_regra">
+        <option value="">Sem rateio</option>
+        ${regras.map(r => `<option value="${r.id}">${r.nome}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label>Arquivos (fotos, cupons)</label>
+      <input type="file" id="nc_arquivos" multiple accept="image/*,application/pdf" class="modal-input" /></div>
+    <div class="sb-msg" id="ncMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Enviar', cls: 'primary', action: 'submitNovaCompra()' },
+  ]);
+}
+
+async function submitNovaCompra() {
+  const loja   = state.usuario?.loja_id || 1;
+  const evento = document.getElementById('nc_evento').value.trim();
+  const valor  = parseFloat(document.getElementById('nc_valor').value);
+  const regra  = document.getElementById('nc_regra').value;
+  const msg    = document.getElementById('ncMsg');
+
+  if (!evento || isNaN(valor)) { msg.textContent = 'Preencha evento e valor.'; return; }
+
+  const fd = new FormData();
+  fd.append('loja_id', loja);
+  fd.append('evento', evento);
+  fd.append('valor', valor);
+  if (regra) fd.append('regra_rateio_id', regra);
+  const arqs = document.getElementById('nc_arquivos').files;
+  for (const f of arqs) fd.append('arquivos', f);
+
+  try {
+    msg.textContent = 'Enviando…';
+    const opts = { method: 'POST', body: fd };
+    if (state.token) opts.headers = { Authorization: 'Basic ' + state.token };
+    const res = await fetch(apiBase() + '/compras', opts);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Erro ao enviar');
+    fecharModal();
+    renderComprasView();
+  } catch(e) {
+    msg.textContent = e.message;
+  }
+}
+
+async function aprovarCompra(id) {
+  const obs = prompt('Observação (opcional):') || '';
+  try {
+    await api('PATCH', `/compras/${id}/status`, { status: 'aprovado', observacao: obs });
+    renderComprasView();
+  } catch(e) { alert(e.message); }
+}
+
+async function rejeitarCompra(id) {
+  const obs = prompt('Motivo da rejeição:') || '';
+  try {
+    await api('PATCH', `/compras/${id}/status`, { status: 'rejeitado', observacao: obs });
+    renderComprasView();
+  } catch(e) { alert(e.message); }
+}
+
+async function toggleVisibilidade(id, visivel) {
+  try {
+    await api('PATCH', `/compras/${id}/visibilidade`, { visivel });
+    renderComprasView();
+  } catch(e) { alert(e.message); }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  CENTROS DE CUSTO & RATEIO
+// ═══════════════════════════════════════════════════════════
+
+async function renderRateioView() {
+  const el   = document.getElementById('rateioView');
+  const loja = state.usuario?.loja_id || 1;
+  el.innerHTML = `
+    <div class="view-header"><h1>Centros de Custo & Rateio</h1></div>
+    <div class="rateio-grid">
+      <section>
+        <div class="section-header">
+          <h2>Centros de Custo</h2>
+          <button class="btn-primary small" onclick="abrirNovoCentro()">+ Novo</button>
+        </div>
+        <div id="centrosLista"><div class="loading">Carregando…</div></div>
+      </section>
+      <section>
+        <div class="section-header">
+          <h2>Regras de Rateio</h2>
+          <button class="btn-primary small" onclick="abrirNovaRegra()">+ Nova</button>
+        </div>
+        <div id="regrasLista"><div class="loading">Carregando…</div></div>
+      </section>
+    </div>
+  `;
+  await Promise.all([carregarCentros(loja), carregarRegras(loja)]);
+}
+
+async function carregarCentros(loja) {
+  try {
+    const centros = await api('GET', `/centros-custo?loja_id=${loja}&apenas_ativos=false`);
+    const el = document.getElementById('centrosLista');
+    el.innerHTML = centros.length
+      ? centros.map(c => `
+          <div class="rateio-item ${c.ativo ? '' : 'inativo'}">
+            <div class="ri-nome">${c.nome} ${!c.ativo ? '<span class="badge-inativo">inativo</span>' : ''}</div>
+            ${c.descricao ? `<div class="ri-desc">${c.descricao}</div>` : ''}
+            <div class="ri-acoes">
+              <button class="btn-sm neutral" onclick="editarCentro(${c.id},'${c.nome.replace(/'/g,"\\'")}','${(c.descricao||'').replace(/'/g,"\\'")}',${c.ativo})">Editar</button>
+              <button class="btn-sm danger"  onclick="deletarCentro(${c.id})">Excluir</button>
+            </div>
+          </div>`).join('')
+      : '<p class="empty-msg">Nenhum centro cadastrado.</p>';
+  } catch(e) {
+    document.getElementById('centrosLista').innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+async function carregarRegras(loja) {
+  try {
+    const regras = await api('GET', `/regras-rateio?loja_id=${loja}&apenas_ativas=false`);
+    const el = document.getElementById('regrasLista');
+    el.innerHTML = regras.length
+      ? regras.map(r => `
+          <div class="rateio-item ${r.ativo ? '' : 'inativo'}">
+            <div class="ri-nome">${r.nome} ${!r.ativo ? '<span class="badge-inativo">inativo</span>' : ''}</div>
+            ${r.descricao ? `<div class="ri-desc">${r.descricao}</div>` : ''}
+            <div class="ri-itens">
+              ${(r.itens||[]).map(i => `<span class="rateio-tag">${i.centro_nome}: ${i.percentual}%</span>`).join('')}
+            </div>
+            <div class="ri-acoes">
+              <button class="btn-sm danger" onclick="deletarRegra(${r.id})">Excluir</button>
+            </div>
+          </div>`).join('')
+      : '<p class="empty-msg">Nenhuma regra cadastrada.</p>';
+  } catch(e) {
+    document.getElementById('regrasLista').innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+async function abrirNovoCentro() {
+  abrirModal('Novo Centro de Custo', `
+    <div class="form-group"><label>Nome</label>
+      <input class="modal-input" id="cc_nome" placeholder="Ex: Loja Principal" /></div>
+    <div class="form-group"><label>Descrição</label>
+      <input class="modal-input" id="cc_desc" placeholder="Opcional" /></div>
+    <div class="sb-msg" id="ccMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: 'salvarCentro()' },
+  ]);
+}
+
+async function salvarCentro() {
+  const loja = state.usuario?.loja_id || 1;
+  const nome = document.getElementById('cc_nome').value.trim();
+  const desc = document.getElementById('cc_desc').value.trim();
+  if (!nome) { document.getElementById('ccMsg').textContent = 'Informe o nome.'; return; }
+  try {
+    await api('POST', '/centros-custo', { loja_id: loja, nome, descricao: desc || null });
+    fecharModal(); renderRateioView();
+  } catch(e) { document.getElementById('ccMsg').textContent = e.message; }
+}
+
+async function editarCentro(id, nome, desc, ativo) {
+  abrirModal('Editar Centro de Custo', `
+    <div class="form-group"><label>Nome</label>
+      <input class="modal-input" id="cc_nome" value="${nome}" /></div>
+    <div class="form-group"><label>Descrição</label>
+      <input class="modal-input" id="cc_desc" value="${desc}" /></div>
+    <div class="form-group"><label style="display:flex;gap:8px;align-items:center">
+      <input type="checkbox" id="cc_ativo" ${ativo ? 'checked' : ''}> Ativo</label></div>
+    <div class="sb-msg" id="ccMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: `atualizarCentro(${id})` },
+  ]);
+}
+
+async function atualizarCentro(id) {
+  const nome  = document.getElementById('cc_nome').value.trim();
+  const desc  = document.getElementById('cc_desc').value.trim();
+  const ativo = document.getElementById('cc_ativo').checked;
+  try {
+    await api('PUT', `/centros-custo/${id}`, { nome, descricao: desc || null, ativo });
+    fecharModal(); renderRateioView();
+  } catch(e) { document.getElementById('ccMsg').textContent = e.message; }
+}
+
+async function deletarCentro(id) {
+  if (!confirm('Excluir este centro de custo?')) return;
+  try { await api('DELETE', `/centros-custo/${id}`); renderRateioView(); }
+  catch(e) { alert(e.message); }
+}
+
+async function abrirNovaRegra() {
+  const loja = state.usuario?.loja_id || 1;
+  let centros = [];
+  try { centros = await api('GET', `/centros-custo?loja_id=${loja}`); } catch(_) {}
+
+  if (!centros.length) {
+    alert('Cadastre ao menos um centro de custo antes de criar uma regra.');
+    return;
+  }
+
+  abrirModal('Nova Regra de Rateio', `
+    <div class="form-group"><label>Nome</label>
+      <input class="modal-input" id="rr_nome" placeholder="Ex: Rateio Padrão" /></div>
+    <div class="form-group"><label>Descrição</label>
+      <input class="modal-input" id="rr_desc" placeholder="Opcional" /></div>
+    <div class="form-group"><label>Distribuição (deve somar 100%)</label>
+      <div id="rr_itens">
+        ${centros.map(c => `
+          <div class="rateio-input-row">
+            <span class="rateio-cc-label">${c.nome}</span>
+            <input type="number" class="modal-input rr-pct" data-id="${c.id}"
+                   placeholder="0" min="0" max="100" step="0.01" style="width:80px" />
+            <span>%</span>
+          </div>`).join('')}
+      </div>
+      <div id="rr_total" class="rateio-total">Total: 0%</div>
+    </div>
+    <div class="sb-msg" id="rrMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: 'salvarRegra()' },
+  ]);
+
+  document.querySelectorAll('.rr-pct').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const t = [...document.querySelectorAll('.rr-pct')].reduce((s,i) => s + (parseFloat(i.value)||0), 0);
+      document.getElementById('rr_total').textContent = `Total: ${t.toFixed(2)}%`;
+      document.getElementById('rr_total').style.color = Math.abs(t - 100) < 0.01 ? 'green' : '#dc2626';
+    });
+  });
+}
+
+async function salvarRegra() {
+  const loja = state.usuario?.loja_id || 1;
+  const nome = document.getElementById('rr_nome').value.trim();
+  const desc = document.getElementById('rr_desc').value.trim();
+  const itens = [...document.querySelectorAll('.rr-pct')]
+    .map(i => ({ centro_custo_id: parseInt(i.dataset.id), percentual: parseFloat(i.value) || 0 }))
+    .filter(i => i.percentual > 0);
+
+  if (!nome) { document.getElementById('rrMsg').textContent = 'Informe o nome.'; return; }
+  try {
+    await api('POST', '/regras-rateio', { loja_id: loja, nome, descricao: desc || null, itens });
+    fecharModal(); renderRateioView();
+  } catch(e) { document.getElementById('rrMsg').textContent = e.message; }
+}
+
+async function deletarRegra(id) {
+  if (!confirm('Excluir esta regra de rateio?')) return;
+  try { await api('DELETE', `/regras-rateio/${id}`); renderRateioView(); }
+  catch(e) { alert(e.message); }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  RELATÓRIOS
+// ═══════════════════════════════════════════════════════════
+
+async function renderRelatoriosView() {
+  const el   = document.getElementById('relatoriosView');
+  const loja = state.usuario?.loja_id || 1;
+  const hoje = new Date().toISOString().split('T')[0];
+  const m1   = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().split('T')[0];
+
+  el.innerHTML = `
+    <div class="view-header"><h1>Relatórios</h1></div>
+    <div class="relat-tabs">
+      <button class="relat-tab active" onclick="mudarRelat('tesouraria', this)">Tesouraria</button>
+      <button class="relat-tab" onclick="mudarRelat('mensalidades', this)">Mensalidades</button>
+      <button class="relat-tab" onclick="mudarRelat('agenda', this)">Agenda</button>
+    </div>
+    <div class="relat-filtros">
+      <div class="form-group inline"><label>De</label>
+        <input type="date" id="relat_inicio" value="${m1}" /></div>
+      <div class="form-group inline"><label>Até</label>
+        <input type="date" id="relat_fim" value="${hoje}" /></div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+        <input type="checkbox" id="relat_ocultos"> Incluir ocultos</label>
+      <button class="btn-primary" onclick="gerarRelatorio()">Gerar</button>
+      <button class="btn-neutral print-only-btn" onclick="window.print()">⎙ Imprimir</button>
+    </div>
+    <div id="relatConteudo"></div>
+  `;
+  await gerarRelatorio();
+}
+
+let _relatAtivo = 'tesouraria';
+function mudarRelat(tipo, btn) {
+  _relatAtivo = tipo;
+  document.querySelectorAll('.relat-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  gerarRelatorio();
+}
+
+async function gerarRelatorio() {
+  const loja  = state.usuario?.loja_id || 1;
+  const ini   = document.getElementById('relat_inicio')?.value || '';
+  const fim   = document.getElementById('relat_fim')?.value || '';
+  const ocultos = document.getElementById('relat_ocultos')?.checked ? 'true' : 'false';
+  const el    = document.getElementById('relatConteudo');
+  if (!el) return;
+  el.innerHTML = '<div class="loading">Gerando relatório…</div>';
+
+  try {
+    let html = '';
+    if (_relatAtivo === 'tesouraria') {
+      const r = await api('GET', `/relatorios/tesouraria?loja_id=${loja}&incluir_ocultos=${ocultos}&data_inicio=${ini}&data_fim=${fim}`);
+      html = renderRelatTesouraria(r);
+    } else if (_relatAtivo === 'mensalidades') {
+      const r = await api('GET', `/relatorios/mensalidades?loja_id=${loja}&data_inicio=${ini}&data_fim=${fim}`);
+      html = renderRelatMensalidades(r);
+    } else {
+      const r = await api('GET', `/relatorios/agenda?loja_id=${loja}&data_inicio=${ini}&data_fim=${fim}`);
+      html = renderRelatAgenda(r);
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+function renderRelatTesouraria(r) {
+  const totalAprov = r.resumo_status?.find(s => s.status === 'aprovado')?.total || 0;
+  const totalPend  = r.resumo_status?.find(s => s.status === 'pendente')?.total || 0;
+  const totalRej   = r.resumo_status?.find(s => s.status === 'rejeitado')?.total || 0;
+
+  return `
+    <div class="relat-resumo">
+      <div class="relat-card green"><div class="relat-val">R$ ${parseFloat(totalAprov).toFixed(2)}</div><div>Aprovado</div></div>
+      <div class="relat-card yellow"><div class="relat-val">R$ ${parseFloat(totalPend).toFixed(2)}</div><div>Pendente</div></div>
+      <div class="relat-card red"><div class="relat-val">R$ ${parseFloat(totalRej).toFixed(2)}</div><div>Rejeitado</div></div>
+    </div>
+    ${r.resumo_centros_custo?.length ? `
+    <h3 style="margin:20px 0 8px">Por centro de custo</h3>
+    <table class="relat-table">
+      <thead><tr><th>Centro</th><th>Total aprovado</th></tr></thead>
+      <tbody>${r.resumo_centros_custo.map(c => `<tr><td>${c.centro_nome}</td><td>R$ ${parseFloat(c.total).toFixed(2)}</td></tr>`).join('')}</tbody>
+    </table>` : ''}
+    <h3 style="margin:20px 0 8px">Lançamentos</h3>
+    <table class="relat-table">
+      <thead><tr><th>Data</th><th>Irmão</th><th>Evento</th><th>Valor</th><th>Status</th><th>Aprovado por</th></tr></thead>
+      <tbody>${(r.compras||[]).map(c => `
+        <tr class="${c.visivel ? '' : 'row-oculto'}">
+          <td>${new Date(c.criado_em).toLocaleDateString('pt-BR')}</td>
+          <td>${c.usuario_nome}</td>
+          <td>${c.evento}</td>
+          <td>R$ ${parseFloat(c.valor).toFixed(2)}</td>
+          <td><span class="badge-status ${c.status}">${c.status}</span></td>
+          <td>${c.aprovado_por_nome || '—'}</td>
+        </tr>
+        ${c.rateio?.length ? `<tr class="row-rateio"><td colspan="6">
+          <small>⚖️ Rateio: ${c.rateio.map(i => `${i.centro_nome} ${i.percentual}% = R$ ${parseFloat(i.valor_rateado).toFixed(2)}`).join(' | ')}</small>
+        </td></tr>` : ''}
+      `).join('')}</tbody>
+    </table>
+  `;
+}
+
+function renderRelatMensalidades(rows) {
+  if (!rows.length) return '<p class="empty-msg">Nenhuma mensalidade no período.</p>';
+  return `
+    <table class="relat-table">
+      <thead><tr><th>Irmão</th><th>CIM</th><th>Categoria</th><th>Valor/mês</th><th>Vigência</th></tr></thead>
+      <tbody>${rows.map(r => `
+        <tr>
+          <td>${r.nome}</td>
+          <td>${r.cim || '—'}</td>
+          <td>${r.categoria}</td>
+          <td>R$ ${parseFloat(r.valor_mensal).toFixed(2)}</td>
+          <td>${r.vigencia_inicio ? new Date(r.vigencia_inicio).toLocaleDateString('pt-BR') : '—'} → ${r.vigencia_fim ? new Date(r.vigencia_fim).toLocaleDateString('pt-BR') : 'Indefinido'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderRelatAgenda(rows) {
+  if (!rows.length) return '<p class="empty-msg">Nenhum evento no período.</p>';
+  return `
+    <table class="relat-table">
+      <thead><tr><th>Data</th><th>Horário</th><th>Título</th><th>Tipo</th><th>Status</th></tr></thead>
+      <tbody>${rows.map(r => `
+        <tr>
+          <td>${new Date(r.data_evento + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
+          <td>${r.hora_inicio} – ${r.hora_fim}</td>
+          <td>${r.titulo}</td>
+          <td>${r.tipo}</td>
+          <td>${r.status}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  HELPER: modal genérico com botões
+// ═══════════════════════════════════════════════════════════
+
+function abrirModal(titulo, corpo, botoes) {
+  document.getElementById('modalTitle').textContent = titulo;
+  document.getElementById('modalBody').innerHTML   = corpo;
+  document.getElementById('modalFooter').innerHTML = botoes.map(b =>
+    `<button class="func-btn ${b.cls}" onclick="${b.action}">${b.label}</button>`
+  ).join('');
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+function fecharModal() {
+  document.getElementById('modalOverlay').style.display = 'none';
+}
+
 
 // Fecha sidebar ao navegar (mobile)
 function _navClick() {
