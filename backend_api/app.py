@@ -1348,9 +1348,10 @@ def obter_irmao(
 ):
     with db.transaction() as tx:
         irmao = tx.fetch_one(
-            """SELECT i.*, u.cargo, u.email AS usuario_email
+            """SELECT i.*, cg.nome AS cargo, u.email AS usuario_email
                FROM irmaos i
                LEFT JOIN usuarios u ON u.id = i.usuario_id
+               LEFT JOIN cargos cg ON cg.id = u.cargo_id
                WHERE i.id = %s""",
             (irmao_id,),
         )
