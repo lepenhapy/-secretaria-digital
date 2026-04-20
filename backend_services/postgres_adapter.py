@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 
 class PostgresTransaction:
@@ -28,16 +29,35 @@ class PostgresTransaction:
 class PostgresDatabase:
     def __init__(self, dsn: str):
         self.dsn = dsn
+        self._pool: ConnectionPool | None = None
+
+    def open(self):
+        if self._pool is None:
+            self._pool = ConnectionPool(
+                self.dsn,
+                min_size=2,
+                max_size=10,
+                kwargs={"row_factory": dict_row},
+                open=True,
+            )
+
+    def close(self):
+        if self._pool:
+            self._pool.close()
+            self._pool = None
 
     @contextmanager
     def transaction(self):
-        with psycopg.connect(self.dsn) as conn:
-            try:
+        if self._pool is None:
+            # Fallback: conexão direta (antes do pool estar pronto)
+            with psycopg.connect(self.dsn) as conn:
                 with conn.transaction():
                     yield PostgresTransaction(conn)
-            except Exception:
-                conn.rollback()
-                raise
+            return
+
+        with self._pool.connection() as conn:
+            with conn.transaction():
+                yield PostgresTransaction(conn)
 
 
 def _resolve_ipv4(host: str, port: int) -> str:

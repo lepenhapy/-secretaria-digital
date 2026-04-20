@@ -45,11 +45,14 @@ from backend_services.core_transaction_services import (
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
+    # Abre o connection pool
+    db = get_database()
+    db.open()
+
     # Inicia o scheduler de tarefas diárias
     scheduler = get_scheduler()
     birthday_svc = get_birthday_service()
 
-    import os
     loja_id_default = int(os.getenv('DEFAULT_LOJA_ID', '1'))
 
     scheduler.add_daily(
@@ -60,6 +63,7 @@ async def lifespan(app_: FastAPI):
     scheduler.start()
     yield
     scheduler.stop()
+    db.close()
 
 
 app = FastAPI(title="Secretaria Digital", lifespan=lifespan)

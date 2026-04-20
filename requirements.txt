@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 aiofiles
+psycopg-pool
 psycopg[binary]
 pydantic
 argon2-cffi
