@@ -16,10 +16,12 @@ from backend_api.dependencies import (
     get_birthday_service,
     get_boleto_processor,
     get_calendar_service,
+    get_comissoes_service,
     get_compras_service,
     get_current_actor,
     get_database,
     get_file_storage,
+    get_permissoes_service,
     get_rateio_service,
     get_registration_service,
     get_relatorios_service,
@@ -27,7 +29,9 @@ from backend_api.dependencies import (
     get_services,
     get_whatsapp_service,
 )
+from backend_services.comissoes_service import ComissoesService
 from backend_services.compras_service import ComprasService
+from backend_services.permissoes_service import PermissoesService
 from backend_services.rateio_service import RateioService
 from backend_services.relatorios_service import RelatoriosService
 from backend_services.birthday_service import BirthdayService
@@ -1134,6 +1138,141 @@ def relatorio_agenda(
     svc: RelatoriosService = Depends(get_relatorios_service),
 ):
     return svc.agenda(loja_id, data_inicio, data_fim)
+
+
+# ═══════════════════════════════════════════════════════════
+#  PERMISSÕES POR CARGO
+# ═══════════════════════════════════════════════════════════
+
+class SalvarPermissaoInput(BaseModel):
+    cargo: str
+    recurso: str
+    acoes: list[str]
+
+@app.get("/permissoes")
+def listar_permissoes(
+    loja_id: int = Query(...),
+    actor: Actor = Depends(get_current_actor),
+    svc: PermissoesService = Depends(get_permissoes_service),
+):
+    return {
+        "permissoes": svc.listar(loja_id),
+        "recursos":   svc.listar_recursos(),
+    }
+
+@app.put("/permissoes")
+def salvar_permissao(
+    loja_id: int = Query(...),
+    payload: SalvarPermissaoInput = ...,
+    actor: Actor = Depends(get_current_actor),
+    svc: PermissoesService = Depends(get_permissoes_service),
+):
+    svc.salvar(loja_id, payload.cargo, payload.recurso, payload.acoes)
+    return {"status": "saved"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  COMISSÕES
+# ═══════════════════════════════════════════════════════════
+
+class ComissaoInput(BaseModel):
+    loja_id: int
+    nome: str
+    descricao: Optional[str] = None
+
+class ComissaoUpdateInput(BaseModel):
+    nome: str
+    descricao: Optional[str] = None
+    ativo: bool = True
+
+class MembroInput(BaseModel):
+    irmao_id: int
+    funcao: Optional[str] = None
+    data_inicio: Optional[str] = None
+    data_fim: Optional[str] = None
+
+class AtribuirCargoInput(BaseModel):
+    irmao_id: int
+    cargo: str
+
+@app.post("/comissoes", status_code=201)
+def criar_comissao(
+    payload: ComissaoInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: ComissoesService = Depends(get_comissoes_service),
+):
+    cid = svc.criar_comissao(payload.loja_id, payload.nome, payload.descricao)
+    return {"id": cid}
+
+@app.get("/comissoes")
+def listar_comissoes(
+    loja_id: int = Query(...),
+    apenas_ativas: bool = Query(default=True),
+    actor: Actor = Depends(get_current_actor),
+    svc: ComissoesService = Depends(get_comissoes_service),
+):
+    return svc.listar_comissoes(loja_id, apenas_ativas)
+
+@app.put("/comissoes/{comissao_id}")
+def atualizar_comissao(
+    comissao_id: int,
+    payload: ComissaoUpdateInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: ComissoesService = Depends(get_comissoes_service),
+):
+    svc.atualizar_comissao(comissao_id, payload.nome, payload.descricao, payload.ativo)
+    return {"status": "updated"}
+
+@app.delete("/comissoes/{comissao_id}")
+def deletar_comissao(
+    comissao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: ComissoesService = Depends(get_comissoes_service),
+):
+    svc.deletar_comissao(comissao_id)
+    return {"status": "deleted"}
+
+@app.post("/comissoes/{comissao_id}/membros", status_code=201)
+def adicionar_membro(
+    comissao_id: int,
+    payload: MembroInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: ComissoesService = Depends(get_comissoes_service),
+):
+    svc.adicionar_membro(comissao_id, payload.irmao_id, payload.funcao,
+                         payload.data_inicio, payload.data_fim)
+    return {"status": "added"}
+
+@app.delete("/comissoes/{comissao_id}/membros/{irmao_id}")
+def remover_membro(
+    comissao_id: int,
+    irmao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: ComissoesService = Depends(get_comissoes_service),
+):
+    svc.remover_membro(comissao_id, irmao_id)
+    return {"status": "removed"}
+
+@app.get("/irmaos/cargos")
+def listar_irmaos_cargos(
+    loja_id: int = Query(...),
+    actor: Actor = Depends(get_current_actor),
+    svc: ComissoesService = Depends(get_comissoes_service),
+):
+    return svc.listar_irmaos_com_cargos(loja_id)
+
+@app.put("/irmaos/cargos")
+def atribuir_cargo_irmao(
+    loja_id: int = Query(...),
+    payload: AtribuirCargoInput = ...,
+    actor: Actor = Depends(get_current_actor),
+    svc: ComissoesService = Depends(get_comissoes_service),
+):
+    try:
+        svc.atribuir_cargo(payload.irmao_id, payload.cargo, loja_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "updated"}
 
 
 # ── WhatsApp: status da instância ─────────────────────────────────────────

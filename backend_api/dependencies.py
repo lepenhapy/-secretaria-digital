@@ -10,8 +10,10 @@ from backend_services.core_transaction_services import CoreTransactionServices
 from backend_services.birthday_service import BirthdayService
 from backend_services.boleto_processor import BoletoProcessor
 from backend_services.calendar_service import CalendarService
+from backend_services.comissoes_service import ComissoesService
 from backend_services.compras_service import ComprasService
 from backend_services.email_service import EmailService
+from backend_services.permissoes_service import PermissoesService
 from backend_services.file_storage_service import FileStorageService
 from backend_services.postgres_adapter import PostgresDatabase, build_postgres_dsn
 from backend_services.rateio_service import RateioService
@@ -35,6 +37,8 @@ _scheduler = None
 _compras_service = None
 _rateio_service = None
 _relatorios_service = None
+_permissoes_service = None
+_comissoes_service = None
 _basic_security = HTTPBasic()
 
 
@@ -152,6 +156,23 @@ def get_relatorios_service():
     if _relatorios_service is None:
         _relatorios_service = RelatoriosService(db=get_database())
     return _relatorios_service
+
+
+def get_permissoes_service():
+    global _permissoes_service
+    if _permissoes_service is None:
+        _permissoes_service = PermissoesService(db=get_database())
+    return _permissoes_service
+
+
+def get_comissoes_service():
+    global _comissoes_service
+    if _comissoes_service is None:
+        _comissoes_service = ComissoesService(
+            db=get_database(),
+            whatsapp_service=get_whatsapp_service(),
+        )
+    return _comissoes_service
 
 
 def get_current_actor(

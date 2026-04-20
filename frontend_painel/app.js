@@ -432,7 +432,8 @@ async function login() {
 }
 
 function mostrarView(id) {
-  ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView','relatoriosView'].forEach(v => {
+  ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
+   'relatoriosView','permissoesView','comissoesView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -492,6 +493,12 @@ function renderSidebar() {
     <div class="sidebar-nav-module" id="nav-relatorios" onclick="abrirModulo('relatorios')">
       <span style="font-size:15px">📊</span><span>Relatórios</span>
     </div>
+    <div class="sidebar-nav-module" id="nav-comissoes" onclick="abrirModulo('comissoes')">
+      <span style="font-size:15px">👥</span><span>Comissões</span>
+    </div>
+    <div class="sidebar-nav-module" id="nav-permissoes" onclick="abrirModulo('permissoes')">
+      <span style="font-size:15px">🔐</span><span>Permissões</span>
+    </div>
   `;
 
   // Cargos
@@ -521,9 +528,11 @@ function abrirModulo(id) {
     boletos:        () => { mostrarView('irmaoView');     renderBoletosView(); },
     aniversarios:   () => { mostrarView('irmaoView');     renderAniversariosView(); },
     agenda:         () => { mostrarView('irmaoView');     renderAgendaView(); },
-    compras:        () => { mostrarView('comprasView');   renderComprasView(); },
-    rateio:         () => { mostrarView('rateioView');    renderRateioView(); },
+    compras:        () => { mostrarView('comprasView');    renderComprasView(); },
+    rateio:         () => { mostrarView('rateioView');     renderRateioView(); },
     relatorios:     () => { mostrarView('relatoriosView'); renderRelatoriosView(); },
+    comissoes:      () => { mostrarView('comissoesView');  renderComissoesView(); },
+    permissoes:     () => { mostrarView('permissoesView'); renderPermissoesView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -1670,6 +1679,276 @@ function abrirModal(titulo, corpo, botoes) {
 
 function fecharModal() {
   document.getElementById('modalOverlay').style.display = 'none';
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  COMISSÕES
+// ═══════════════════════════════════════════════════════════
+
+async function renderComissoesView() {
+  const el   = document.getElementById('comissoesView');
+  const loja = state.usuario?.loja_id || 1;
+  el.innerHTML = `
+    <div class="view-header">
+      <h1>Comissões & Cargos</h1>
+    </div>
+    <div class="rateio-grid">
+      <section>
+        <div class="section-header">
+          <h2>Comissões</h2>
+          <button class="btn-primary small" onclick="abrirNovaComissao()">+ Nova</button>
+        </div>
+        <div id="comissoesLista"><div class="loading">Carregando…</div></div>
+      </section>
+      <section>
+        <div class="section-header">
+          <h2>Cargos dos Irmãos</h2>
+          <small style="color:var(--muted);font-size:11px">Vínculo irmão ↔ cargo no sistema</small>
+        </div>
+        <div id="cargosLista"><div class="loading">Carregando…</div></div>
+      </section>
+    </div>
+  `;
+  await Promise.all([carregarComissoes(loja), carregarCargosIrmaos(loja)]);
+}
+
+async function carregarComissoes(loja) {
+  try {
+    const lista = await api('GET', `/comissoes?loja_id=${loja}&apenas_ativas=false`);
+    const el = document.getElementById('comissoesLista');
+    el.innerHTML = lista.length ? lista.map(c => `
+      <div class="rateio-item ${c.ativo ? '' : 'inativo'}">
+        <div class="ri-nome">${c.nome} ${!c.ativo ? '<span class="badge-inativo">inativa</span>' : ''}
+          <span class="badge-count">${c.total_membros} membro(s)</span>
+        </div>
+        ${c.descricao ? `<div class="ri-desc">${c.descricao}</div>` : ''}
+        <div class="ri-itens">
+          ${(c.membros||[]).map(m => `
+            <span class="rateio-tag">
+              ${m.irmao_nome}${m.funcao ? ' — ' + m.funcao : ''}
+              <button class="tag-remove" onclick="removerMembroComissao(${c.id},${m.irmao_id})" title="Remover">✕</button>
+            </span>`).join('')}
+        </div>
+        <div class="ri-acoes">
+          <button class="btn-sm success" onclick="abrirAdicionarMembro(${c.id},'${c.nome.replace(/'/g,"\\'")}')">+ Membro</button>
+          <button class="btn-sm neutral" onclick="editarComissao(${c.id},'${c.nome.replace(/'/g,"\\'")}','${(c.descricao||'').replace(/'/g,"\\'")}',${c.ativo})">Editar</button>
+          <button class="btn-sm danger"  onclick="deletarComissao(${c.id})">Excluir</button>
+        </div>
+      </div>`).join('')
+    : '<p class="empty-msg">Nenhuma comissão cadastrada.</p>';
+  } catch(e) {
+    document.getElementById('comissoesLista').innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+async function carregarCargosIrmaos(loja) {
+  try {
+    const irmaos = await api('GET', `/irmaos/cargos?loja_id=${loja}`);
+    const CARGOS_SISTEMA = [
+      'veneravel_mestre','primeiro_vigilante','segundo_vigilante',
+      'financeiro','secretario','orador','chanceler','hospitaleiro',
+      'guarda_templo','mestre_cerimonias'
+    ];
+    const el = document.getElementById('cargosLista');
+    el.innerHTML = irmaos.length ? irmaos.map(i => `
+      <div class="cargo-irmao-row">
+        <div class="ci-nome">${i.nome}${i.cim ? ` <span class="cim-badge">${i.cim}</span>` : ''}</div>
+        <select class="ci-select" data-id="${i.id}" onchange="salvarCargoIrmao(${i.id}, this.value, ${loja})">
+          <option value="">— sem cargo —</option>
+          ${CARGOS_SISTEMA.map(c => `<option value="${c}" ${i.cargo_sistema===c?'selected':''}>${c.replace(/_/g,' ')}</option>`).join('')}
+        </select>
+      </div>`).join('')
+    : '<p class="empty-msg">Nenhum irmão cadastrado.</p>';
+  } catch(e) {
+    document.getElementById('cargosLista').innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+async function salvarCargoIrmao(irmaoId, cargo, loja) {
+  try {
+    await api('PUT', `/irmaos/cargos?loja_id=${loja}`, { irmao_id: irmaoId, cargo: cargo || '' });
+  } catch(e) { alert(e.message); carregarCargosIrmaos(loja); }
+}
+
+async function abrirNovaComissao() {
+  abrirModal('Nova Comissão', `
+    <div class="form-group"><label>Nome</label>
+      <input class="modal-input" id="nc2_nome" placeholder="Ex: Comissão de Iniciação" /></div>
+    <div class="form-group"><label>Descrição</label>
+      <input class="modal-input" id="nc2_desc" placeholder="Opcional" /></div>
+    <div class="sb-msg" id="nc2Msg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: 'salvarNovaComissao()' },
+  ]);
+}
+
+async function salvarNovaComissao() {
+  const loja = state.usuario?.loja_id || 1;
+  const nome = document.getElementById('nc2_nome').value.trim();
+  const desc = document.getElementById('nc2_desc').value.trim();
+  if (!nome) { document.getElementById('nc2Msg').textContent = 'Informe o nome.'; return; }
+  try {
+    await api('POST', '/comissoes', { loja_id: loja, nome, descricao: desc || null });
+    fecharModal(); renderComissoesView();
+  } catch(e) { document.getElementById('nc2Msg').textContent = e.message; }
+}
+
+async function editarComissao(id, nome, desc, ativo) {
+  abrirModal('Editar Comissão', `
+    <div class="form-group"><label>Nome</label>
+      <input class="modal-input" id="ec_nome" value="${nome}" /></div>
+    <div class="form-group"><label>Descrição</label>
+      <input class="modal-input" id="ec_desc" value="${desc}" /></div>
+    <div class="form-group"><label style="display:flex;gap:8px;align-items:center">
+      <input type="checkbox" id="ec_ativo" ${ativo?'checked':''}> Ativa</label></div>
+    <div class="sb-msg" id="ecMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: `atualizarComissao(${id})` },
+  ]);
+}
+
+async function atualizarComissao(id) {
+  const nome  = document.getElementById('ec_nome').value.trim();
+  const desc  = document.getElementById('ec_desc').value.trim();
+  const ativo = document.getElementById('ec_ativo').checked;
+  try {
+    await api('PUT', `/comissoes/${id}`, { nome, descricao: desc || null, ativo });
+    fecharModal(); renderComissoesView();
+  } catch(e) { document.getElementById('ecMsg').textContent = e.message; }
+}
+
+async function deletarComissao(id) {
+  if (!confirm('Excluir esta comissão e todos os seus membros?')) return;
+  try { await api('DELETE', `/comissoes/${id}`); renderComissoesView(); }
+  catch(e) { alert(e.message); }
+}
+
+async function abrirAdicionarMembro(comissaoId, comissaoNome) {
+  const loja = state.usuario?.loja_id || 1;
+  let irmaos = [];
+  try { irmaos = await api('GET', `/irmaos?loja_id=${loja}`); } catch(_) {}
+  abrirModal(`Adicionar membro — ${comissaoNome}`, `
+    <div class="form-group"><label>Irmão</label>
+      <select class="modal-input" id="am_irmao">
+        <option value="">Selecione…</option>
+        ${irmaos.map(i => `<option value="${i.id}">${i.nome}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label>Função na comissão</label>
+      <input class="modal-input" id="am_funcao" placeholder="Ex: Presidente, Relator…" /></div>
+    <div class="form-group inline"><label>Início</label>
+      <input type="date" class="modal-input" id="am_inicio" /></div>
+    <div class="form-group inline"><label>Fim</label>
+      <input type="date" class="modal-input" id="am_fim" /></div>
+    <div class="sb-msg" id="amMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Adicionar', cls: 'primary', action: `salvarMembro(${comissaoId})` },
+  ]);
+}
+
+async function salvarMembro(comissaoId) {
+  const irmaoId = parseInt(document.getElementById('am_irmao').value);
+  const funcao  = document.getElementById('am_funcao').value.trim() || null;
+  const inicio  = document.getElementById('am_inicio').value || null;
+  const fim     = document.getElementById('am_fim').value || null;
+  if (!irmaoId) { document.getElementById('amMsg').textContent = 'Selecione um irmão.'; return; }
+  try {
+    await api('POST', `/comissoes/${comissaoId}/membros`,
+      { irmao_id: irmaoId, funcao, data_inicio: inicio, data_fim: fim });
+    fecharModal(); renderComissoesView();
+  } catch(e) { document.getElementById('amMsg').textContent = e.message; }
+}
+
+async function removerMembroComissao(comissaoId, irmaoId) {
+  try {
+    await api('DELETE', `/comissoes/${comissaoId}/membros/${irmaoId}`);
+    renderComissoesView();
+  } catch(e) { alert(e.message); }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  PERMISSÕES POR CARGO
+// ═══════════════════════════════════════════════════════════
+
+async function renderPermissoesView() {
+  const el   = document.getElementById('permissoesView');
+  const loja = state.usuario?.loja_id || 1;
+  el.innerHTML = `
+    <div class="view-header">
+      <h1>Permissões por Cargo</h1>
+      <small style="color:var(--muted);font-size:12px">Configure o que cada cargo pode fazer no sistema</small>
+    </div>
+    <div id="permissoesConteudo"><div class="loading">Carregando…</div></div>
+  `;
+  try {
+    const data = await api('GET', `/permissoes?loja_id=${loja}`);
+    renderMatrizPermissoes(data.permissoes, data.recursos, loja);
+  } catch(e) {
+    document.getElementById('permissoesConteudo').innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+const CARGOS_LABELS = {
+  veneravel_mestre:    'Venerável Mestre',
+  primeiro_vigilante:  '1º Vigilante',
+  segundo_vigilante:   '2º Vigilante',
+  financeiro:          'Financeiro',
+  secretario:          'Secretário',
+  orador:              'Orador',
+  chanceler:           'Chanceler',
+  hospitaleiro:        'Hospitaleiro',
+  guarda_templo:       'Guarda do Templo',
+  mestre_cerimonias:   'Mestre de Cerimônias',
+};
+
+function renderMatrizPermissoes(permissoes, recursos, loja) {
+  const cargos = Object.keys(CARGOS_LABELS);
+  const html = cargos.map(cargo => {
+    const perm = permissoes[cargo] || {};
+    return `
+      <div class="perm-card">
+        <div class="perm-cargo-titulo">${CARGOS_LABELS[cargo] || cargo}</div>
+        <div class="perm-recursos">
+          ${Object.entries(recursos).map(([recurso, acoes]) => `
+            <div class="perm-recurso">
+              <div class="perm-recurso-nome">${recurso}</div>
+              <div class="perm-acoes">
+                ${acoes.map(acao => {
+                  const checked = (perm[recurso] || []).includes(acao) ? 'checked' : '';
+                  return `<label class="perm-check">
+                    <input type="checkbox" ${checked}
+                      onchange="togglePermissao('${cargo}','${recurso}','${acao}',this.checked,${loja})">
+                    ${acao}
+                  </label>`;
+                }).join('')}
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+  }).join('');
+  document.getElementById('permissoesConteudo').innerHTML =
+    `<div class="perm-grid">${html}</div>`;
+}
+
+async function togglePermissao(cargo, recurso, acao, checked, loja) {
+  try {
+    // Lê o estado atual do DOM para montar a lista completa de ações
+    const checks = document.querySelectorAll(
+      `input[onchange*="'${cargo}','${recurso}'"]`
+    );
+    const acoes = [...checks].filter(c => c.checked).map(c => {
+      const m = c.getAttribute('onchange').match(/'([^']+)'\s*,this/);
+      return m ? m[1] : null;
+    }).filter(Boolean);
+    await api('PUT', `/permissoes?loja_id=${loja}`, { cargo, recurso, acoes });
+  } catch(e) {
+    alert('Erro ao salvar: ' + e.message);
+    renderPermissoesView();
+  }
 }
 
 
