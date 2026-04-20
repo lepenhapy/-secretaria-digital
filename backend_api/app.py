@@ -170,7 +170,7 @@ class GenerateBillingInput(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "versao": "agenda-local-v3"}
 
 
 @app.post("/auth/login")
