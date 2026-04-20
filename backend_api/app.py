@@ -825,20 +825,10 @@ def criar_evento(
     return {"status": "created", "event_id": evento.get("id"), "link": evento.get("htmlLink")}
 
 
-@app.delete("/agenda/{event_id}")
-def deletar_evento(
-    event_id: str,
-    actor: Actor = Depends(get_current_actor),
-    cal: CalendarService = Depends(get_calendar_service),
-):
-    if not cal.disponivel:
-        raise HTTPException(status_code=503, detail="Google Calendar não configurado.")
-    cal.deletar_evento(event_id)
-    return {"status": "deleted"}
-
-
 # ═══════════════════════════════════════════════════════════
 #  AGENDA LOCAL (SESSÕES RECORRENTES + EVENTOS AVULSOS)
+#  Definidas ANTES do DELETE /agenda/{event_id} para evitar
+#  conflito de rota no Starlette (parametric route wins).
 # ═══════════════════════════════════════════════════════════
 
 class SessaoInput(BaseModel):
@@ -939,6 +929,18 @@ def deletar_evento_local(
     svc: AgendaService = Depends(get_agenda_service),
 ):
     svc.deletar_evento(evento_id)
+    return {"status": "deleted"}
+
+
+@app.delete("/agenda/{event_id}")
+def deletar_evento_gcal(
+    event_id: str,
+    actor: Actor = Depends(get_current_actor),
+    cal: CalendarService = Depends(get_calendar_service),
+):
+    if not cal.disponivel:
+        raise HTTPException(status_code=503, detail="Google Calendar não configurado.")
+    cal.deletar_evento(event_id)
     return {"status": "deleted"}
 
 
