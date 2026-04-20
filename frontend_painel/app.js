@@ -46,11 +46,11 @@ const CARGOS = [
     nivel: 80,
     icone: '🔦',
     cor: '#0369a1',
-    descricao: 'Substitui o Venerável Mestre em sua ausência e coordena a coluna do Norte.',
+    descricao: 'Substitui o Venerável Mestre em sua ausência e coordena a coluna do Sul.',
     responsabilidades: [
-      { icone: '🔦', titulo: 'Supervisão da coluna Norte', desc: 'Coordena os irmãos da coluna do Norte nas sessões.' },
-      { icone: '🔄', titulo: 'Substituição do VM',         desc: 'Assume a presidência na ausência do Venerável Mestre.' },
-      { icone: '📋', titulo: 'Decisão de contratos',       desc: 'Pode aprovar ou rejeitar contratos quando delegado.' },
+      { icone: '🔦', titulo: 'Supervisão da coluna Sul', desc: 'Coordena os irmãos da coluna do Sul nas sessões.' },
+      { icone: '🔄', titulo: 'Substituição do VM',       desc: 'Assume a presidência na ausência do Venerável Mestre.' },
+      { icone: '📋', titulo: 'Decisão de contratos',     desc: 'Pode aprovar ou rejeitar contratos quando delegado.' },
     ],
     funcionalidades: ['decidir_contrato','criar_mensagem','criar_caso','criar_reembolso',
                       'aprovar_reembolso','upload_arquivo'],
@@ -61,11 +61,11 @@ const CARGOS = [
     nivel: 70,
     icone: '🕯️',
     cor: '#0891b2',
-    descricao: 'Coordena a coluna do Sul e auxilia o 1º Vigilante na gestão das sessões.',
+    descricao: 'Coordena a coluna do Norte e auxilia o 1º Vigilante na gestão das sessões.',
     responsabilidades: [
-      { icone: '🕯️', titulo: 'Supervisão da coluna Sul', desc: 'Coordena os irmãos da coluna do Sul nas sessões.' },
-      { icone: '📩', titulo: 'Registro de ocorrências',  desc: 'Cria mensagens e abre casos operacionais.' },
-      { icone: '📁', titulo: 'Gestão de arquivos',       desc: 'Envia e organiza documentos relacionados à loja.' },
+      { icone: '🕯️', titulo: 'Supervisão da coluna Norte', desc: 'Coordena os irmãos da coluna do Norte nas sessões.' },
+      { icone: '📩', titulo: 'Registro de ocorrências',    desc: 'Cria mensagens e abre casos operacionais.' },
+      { icone: '📁', titulo: 'Gestão de arquivos',         desc: 'Envia e organiza documentos relacionados à loja.' },
     ],
     funcionalidades: ['criar_mensagem','criar_caso','upload_arquivo'],
   },
@@ -819,25 +819,38 @@ async function salvarIrmao() {
   res.className = 'modal-result';
   res.textContent = 'Salvando…';
 
+  // Parseia filhos: "Nome / AAAA-MM-DD" por linha
+  const filhosRaw = (document.getElementById('fi_filhos').value || '').trim();
+  const filhos = filhosRaw
+    ? filhosRaw.split('\n').filter(l => l.trim()).map(l => {
+        const [nome, nasc] = l.split('/').map(s => s.trim());
+        return { nome, data_nascimento: nasc || null };
+      })
+    : [];
+
   const dados = {
-    nome:        document.getElementById('fi_nome').value,
-    cim:         document.getElementById('fi_cim').value,
-    potencia:    document.getElementById('fi_potencia').value,
-    loja:        document.getElementById('fi_loja').value,
-    telefone:    document.getElementById('fi_tel').value,
-    nascimento:  document.getElementById('fi_nasc').value,
-    esposa:      document.getElementById('fi_esposa').value || null,
-    mensalidade: document.getElementById('fi_mensalidade').value,
-    filhos:      document.getElementById('fi_filhos').value,
+    loja_id:              state.usuario?.loja_id || 1,
+    nome:                 document.getElementById('fi_nome').value.trim(),
+    cim:                  document.getElementById('fi_cim').value.trim() || null,
+    potencia:             document.getElementById('fi_potencia').value.trim() || null,
+    telefone:             document.getElementById('fi_tel').value.trim() || null,
+    data_nascimento:      document.getElementById('fi_nasc').value || null,
+    nome_esposa:          document.getElementById('fi_esposa').value.trim() || null,
+    mensalidade_categoria: document.getElementById('fi_mensalidade').value || null,
+    filhos,
   };
 
   try {
     const r = await api('POST', '/irmaos', dados);
     res.className = 'modal-result ok';
-    res.textContent = 'Irmão cadastrado!\n' + JSON.stringify(r, null, 2);
+    res.textContent = 'Irmão cadastrado com sucesso!';
+    // Limpa o formulário
+    ['fi_nome','fi_cim','fi_potencia','fi_loja','fi_tel','fi_nasc','fi_esposa','fi_filhos']
+      .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+    setTimeout(() => renderIrmaoView(), 800);
   } catch (e) {
     res.className = 'modal-result error';
-    res.textContent = '⚠ ' + e.message + '\n\n(Endpoint ainda não existe no backend — será implementado em breve.)';
+    res.textContent = '⚠ ' + (e.data?.detail || e.message);
   }
 }
 
