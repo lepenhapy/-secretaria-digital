@@ -720,6 +720,10 @@ async function renderIrmaoView() {
           ${anivProximo(ir.nascimento) ? '<span class="tag tag-aniv">🎂 Aniversário próximo</span>' : ''}
           <span class="tag" style="background:#f0f9ff;color:#0369a1;border-color:#bae6fd;margin-top:4px">Ver perfil →</span>
         </div>
+        <div class="irmao-card-actions" onclick="event.stopPropagation()">
+          <button class="func-btn neutral" onclick="editarIrmao(${ir.id})">✏ Editar</button>
+          <button class="func-btn danger"  onclick="excluirIrmao(${ir.id})">🗑 Excluir</button>
+        </div>
       </div>
     `;
   }).join('');
@@ -841,6 +845,72 @@ async function salvarIrmao() {
     res.className = 'modal-result error';
     res.textContent = '⚠ ' + (e.data?.detail || e.message);
   }
+}
+
+async function editarIrmao(id) {
+  let ir;
+  try { ir = await api('GET', `/irmaos/${id}`); }
+  catch(e) { alert('Erro ao carregar: ' + e.message); return; }
+  const filhosStr = (ir.filhos || []).map(f =>
+    f.nome + (f.data_nascimento ? ' / ' + f.data_nascimento : '')
+  ).join('\n');
+  abrirModal(`Editar — ${ir.nome}`, `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group" style="grid-column:1/-1"><label>Nome completo</label>
+        <input class="modal-input" id="ei_nome" value="${(ir.nome||'').replace(/"/g,'&quot;')}" /></div>
+      <div class="form-group"><label>CIM</label>
+        <input class="modal-input" id="ei_cim" value="${ir.cim||''}" /></div>
+      <div class="form-group"><label>Potência</label>
+        <select class="modal-input" id="ei_potencia">
+          ${['GOB','COMAB','COMOB','Outra'].map(p=>`<option${ir.potencia===p?' selected':''}>${p}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>WhatsApp / Celular</label>
+        <input class="modal-input" id="ei_tel" value="${ir.telefone||''}" /></div>
+      <div class="form-group"><label>Data de Nascimento</label>
+        <input class="modal-input" type="date" id="ei_nasc" value="${ir.data_nascimento||''}" /></div>
+      <div class="form-group" style="grid-column:1/-1"><label>Nome da Esposa</label>
+        <input class="modal-input" id="ei_esposa" value="${ir.nome_esposa||''}" /></div>
+      <div class="form-group" style="grid-column:1/-1"><label>Filhos (nome / data — um por linha)</label>
+        <textarea class="modal-input" id="ei_filhos" rows="3">${filhosStr}</textarea></div>
+    </div>
+    <div class="sb-msg" id="eiMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar',   cls: 'primary', action: `salvarEdicaoIrmao(${id},${ir.loja_id})` },
+  ]);
+}
+
+async function salvarEdicaoIrmao(id, lojaId) {
+  const filhosRaw = (document.getElementById('ei_filhos').value||'').trim();
+  const filhos = filhosRaw
+    ? filhosRaw.split('\n').filter(l=>l.trim()).map(l=>{
+        const [nome,nasc] = l.split('/').map(s=>s.trim());
+        return { nome, data_nascimento: nasc||null };
+      })
+    : [];
+  const dados = {
+    loja_id:           lojaId,
+    nome:              document.getElementById('ei_nome').value.trim(),
+    cim:               document.getElementById('ei_cim').value.trim()||null,
+    potencia:          document.getElementById('ei_potencia').value||null,
+    telefone:          document.getElementById('ei_tel').value.trim()||null,
+    data_nascimento:   document.getElementById('ei_nasc').value||null,
+    nome_esposa:       document.getElementById('ei_esposa').value.trim()||null,
+    filhos,
+  };
+  try {
+    await api('PUT', `/irmaos/${id}`, dados);
+    fecharModal();
+    renderIrmaoView();
+  } catch(e) { document.getElementById('eiMsg').textContent = '⚠ ' + e.message; }
+}
+
+async function excluirIrmao(id) {
+  if (!confirm('Excluir este irmão? Esta ação não pode ser desfeita.')) return;
+  try {
+    await api('DELETE', `/irmaos/${id}`);
+    renderIrmaoView();
+  } catch(e) { alert('Erro ao excluir: ' + e.message); }
 }
 
 function formatData(iso) {

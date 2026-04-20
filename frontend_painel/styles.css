@@ -449,6 +449,8 @@ body {
 .irmao-card-body  { font-size: 13px; color: var(--muted); line-height: 1.8; }
 .irmao-card-body strong { color: var(--text); }
 .irmao-card-tags  { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.irmao-card-actions { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.irmao-card-actions .func-btn { font-size: 12px; padding: 4px 12px; }
 .tag {
   font-size: 11px; padding: 3px 10px; border-radius: 99px;
   font-weight: 600;

@@ -1408,6 +1408,16 @@ def atualizar_irmao(
     return {"status": "updated"}
 
 
+@app.delete("/irmaos/{irmao_id}", status_code=204)
+def excluir_irmao(
+    irmao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute("DELETE FROM irmaos WHERE id=%s", (irmao_id,))
+
+
 # ═══════════════════════════════════════════════════════════
 #  REPOSITÓRIO DE ARQUIVOS
 # ═══════════════════════════════════════════════════════════
