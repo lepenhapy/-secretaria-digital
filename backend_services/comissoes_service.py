@@ -32,10 +32,11 @@ class ComissoesService:
             for com in comissoes:
                 com["membros"] = tx.fetch_all(
                     """SELECT cm.*, i.nome AS irmao_nome, i.cim,
-                              u.cargo AS cargo_sistema
+                              cg.nome AS cargo_sistema
                        FROM comissoes_membros cm
                        JOIN irmaos i ON i.id = cm.irmao_id
                        LEFT JOIN usuarios u ON u.id = i.usuario_id
+                       LEFT JOIN cargos cg ON cg.id = u.cargo_id
                        WHERE cm.comissao_id=%s AND cm.ativo=TRUE
                        ORDER BY i.nome""",
                     (com["id"],),
@@ -88,18 +89,23 @@ class ComissoesService:
             )
             if not row or not row["usuario_id"]:
                 raise ValueError("Irmão não possui conta de usuário vinculada.")
+            cargo_nome = cargo if cargo else 'irmao_operacional'
+            cargo_row = tx.fetch_one("SELECT id FROM cargos WHERE nome=%s", (cargo_nome,))
+            if not cargo_row:
+                raise ValueError(f"Cargo '{cargo_nome}' não encontrado.")
             tx.execute(
-                "UPDATE usuarios SET cargo=%s WHERE id=%s",
-                (cargo, row["usuario_id"]),
+                "UPDATE usuarios SET cargo_id=%s WHERE id=%s",
+                (cargo_row["id"], row["usuario_id"]),
             )
 
     def listar_irmaos_com_cargos(self, loja_id: int) -> list:
         with self.db.transaction() as tx:
             return tx.fetch_all(
-                """SELECT i.id, i.nome, i.cim, u.cargo AS cargo_sistema,
+                """SELECT i.id, i.nome, i.cim, cg.nome AS cargo_sistema,
                           u.email, u.id AS usuario_id
                    FROM irmaos i
                    LEFT JOIN usuarios u ON u.id = i.usuario_id
+                   LEFT JOIN cargos cg ON cg.id = u.cargo_id
                    WHERE i.loja_id=%s
                    ORDER BY i.nome""",
                 (loja_id,),
