@@ -793,42 +793,8 @@ class CreateEventInput(BaseModel):
     convidados: list[str] = []
 
 
-@app.get("/agenda")
-def listar_agenda(
-    dias: int = Query(default=30),
-    actor: Actor = Depends(get_current_actor),
-    cal: CalendarService = Depends(get_calendar_service),
-):
-    if not cal.disponivel:
-        raise HTTPException(status_code=503, detail="Google Calendar não configurado. Veja .env.example.")
-    return cal.listar_eventos(dias=dias)
-
-
-@app.post("/agenda", status_code=201)
-def criar_evento(
-    payload: CreateEventInput,
-    actor: Actor = Depends(get_current_actor),
-    cal: CalendarService = Depends(get_calendar_service),
-):
-    if not cal.disponivel:
-        raise HTTPException(status_code=503, detail="Google Calendar não configurado. Veja .env.example.")
-    try:
-        evento = cal.criar_evento(
-            titulo=payload.titulo,
-            descricao=payload.descricao,
-            inicio=payload.inicio,
-            fim=payload.fim,
-            convidados=payload.convidados,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"status": "created", "event_id": evento.get("id"), "link": evento.get("htmlLink")}
-
-
 # ═══════════════════════════════════════════════════════════
 #  AGENDA LOCAL (SESSÕES RECORRENTES + EVENTOS AVULSOS)
-#  Definidas ANTES do DELETE /agenda/{event_id} para evitar
-#  conflito de rota no Starlette (parametric route wins).
 # ═══════════════════════════════════════════════════════════
 
 class SessaoInput(BaseModel):
@@ -932,16 +898,6 @@ def deletar_evento_local(
     return {"status": "deleted"}
 
 
-@app.delete("/agenda/{event_id}")
-def deletar_evento_gcal(
-    event_id: str,
-    actor: Actor = Depends(get_current_actor),
-    cal: CalendarService = Depends(get_calendar_service),
-):
-    if not cal.disponivel:
-        raise HTTPException(status_code=503, detail="Google Calendar não configurado.")
-    cal.deletar_evento(event_id)
-    return {"status": "deleted"}
 
 
 # ═══════════════════════════════════════════════════════════
