@@ -177,15 +177,12 @@ const FUNCIONALIDADES = {
       { id: 'f_vig_ini',  label: 'Data de Início', tipo: 'text', valor: '2026-04-01' },
       { id: 'f_vig_fim',  label: 'Data de Fim',    tipo: 'text', valor: '2026-12-31' },
     ],
-    acao: async (campos) => {
-      const r = await api('POST', '/contratos', {
-        loja_id: +campos.f_loja, recurso_id: +campos.f_templo,
-        regra_recorrencia: campos.f_regra,
-        hora_inicio_sessao: campos.f_inicio, hora_fim_sessao: campos.f_fim,
-        vigencia_inicio: campos.f_vig_ini, vigencia_fim: campos.f_vig_fim,
-      });
-      return r;
-    },
+    acao: async (campos) => api('POST', '/contracts', {
+      loja_id: +campos.f_loja, templo_id: +campos.f_templo,
+      regra_recorrencia: campos.f_regra,
+      hora_inicio_sessao: campos.f_inicio, hora_fim_sessao: campos.f_fim,
+      vigencia_inicio: campos.f_vig_ini, vigencia_fim: campos.f_vig_fim || null,
+    }),
   },
   enviar_contrato: {
     icone: '📤', titulo: 'Enviar para Aprovação',
@@ -195,7 +192,7 @@ const FUNCIONALIDADES = {
     campos: [
       { id: 'f_contrato_id', label: 'ID do Contrato', tipo: 'number', valor: '' },
     ],
-    acao: async (c) => api('POST', `/contratos/${c.f_contrato_id}/enviar`),
+    acao: async (c) => api('POST', `/contracts/${c.f_contrato_id}/submit`),
   },
   decidir_contrato: {
     icone: '✅', titulo: 'Aprovar / Rejeitar Contrato',
@@ -207,7 +204,7 @@ const FUNCIONALIDADES = {
       { id: 'f_decisao',     label: 'Decisão (aprovado/recusado)', tipo: 'text', valor: 'aprovado' },
       { id: 'f_obs',         label: 'Observação',      tipo: 'text',   valor: '' },
     ],
-    acao: async (c) => api('POST', `/contratos/${c.f_contrato_id}/decidir`, { decisao: c.f_decisao, observacao: c.f_obs || null }),
+    acao: async (c) => api('POST', `/contracts/${c.f_contrato_id}/decision`, { decisao: c.f_decisao, observacao: c.f_obs || null }),
   },
   ativar_contrato: {
     icone: '🟢', titulo: 'Ativar Contrato',
@@ -217,11 +214,11 @@ const FUNCIONALIDADES = {
     campos: [
       { id: 'f_contrato_id', label: 'ID do Contrato', tipo: 'number', valor: '' },
     ],
-    acao: async (c) => api('POST', `/contratos/${c.f_contrato_id}/ativar`),
+    acao: async (c) => api('POST', '/contracts/activate', { contrato_id: +c.f_contrato_id }),
   },
   criar_mensagem: {
     icone: '✉️', titulo: 'Criar Mensagem',
-    desc: 'Registra uma nova mensagem ou comunicado no sistema, podendo estar vinculada a um contexto específico.',
+    desc: 'Registra uma nova mensagem ou comunicado no sistema.',
     quem: 'admin, veneravel, 1º/2º vigilante, secretário, financeiro',
     cor: '#7c3aed',
     campos: [
@@ -230,13 +227,13 @@ const FUNCIONALIDADES = {
       { id: 'f_contexto', label: 'Contexto',     tipo: 'text',   valor: 'geral' },
       { id: 'f_conteudo', label: 'Conteúdo',     tipo: 'text',   valor: '' },
     ],
-    acao: async (c) => api('POST', '/mensagens', {
-      loja_id: +c.f_loja, tipo: c.f_tipo, contexto: c.f_contexto, conteudo: c.f_conteudo,
+    acao: async (c) => api('POST', '/messages', {
+      loja_id: +c.f_loja, tipo: c.f_tipo, contexto: c.f_contexto, texto: c.f_conteudo,
     }),
   },
   criar_caso: {
     icone: '📂', titulo: 'Abrir Caso Operacional',
-    desc: 'Cria um caso operacional a partir de mensagens existentes, registrando ocorrências para acompanhamento.',
+    desc: 'Cria um caso operacional a partir de mensagens existentes.',
     quem: 'admin, veneravel, 1º/2º vigilante, secretário, financeiro',
     cor: '#d97706',
     campos: [
@@ -245,8 +242,8 @@ const FUNCIONALIDADES = {
       { id: 'f_titulo',label: 'Título do Caso', tipo: 'text',   valor: '' },
       { id: 'f_msgs',  label: 'IDs de Mensagens (vírgula)', tipo: 'text', valor: '' },
     ],
-    acao: async (c) => api('POST', '/casos', {
-      loja_id: +c.f_loja, tipo_caso: c.f_tipo, titulo: c.f_titulo,
+    acao: async (c) => api('POST', '/cases/from-messages', {
+      loja_id_alvo: +c.f_loja, tipo_caso: c.f_tipo, titulo: c.f_titulo,
       mensagem_ids: c.f_msgs.split(',').map(s => +s.trim()).filter(Boolean),
     }),
   },
@@ -261,7 +258,7 @@ const FUNCIONALIDADES = {
       { id: 'f_valor',     label: 'Valor Solicitado',  tipo: 'text',   valor: '0.00' },
       { id: 'f_irmao',     label: 'ID do Irmão',       tipo: 'number', valor: '' },
     ],
-    acao: async (c) => api('POST', '/reembolsos', {
+    acao: async (c) => api('POST', '/reimbursements', {
       caso_id: +c.f_caso, categoria: c.f_categoria,
       valor_solicitado: c.f_valor, irmao_id: c.f_irmao ? +c.f_irmao : null,
     }),
@@ -277,14 +274,14 @@ const FUNCIONALIDADES = {
       { id: 'f_valor',  label: 'Valor Aprovado',             tipo: 'text',   valor: '' },
       { id: 'f_obs',    label: 'Observação',                 tipo: 'text',   valor: '' },
     ],
-    acao: async (c) => api('POST', '/aprovacoes', {
+    acao: async (c) => api('POST', '/approvals', {
       entidade_tipo: 'reembolso', entidade_id: +c.f_reemb,
       decisao: c.f_dec, valor: c.f_valor || null, observacao: c.f_obs || null,
     }),
   },
   pagar_reembolso: {
     icone: '💳', titulo: 'Marcar como Pago',
-    desc: 'Confirma o pagamento de um reembolso aprovado e registra o valor efetivamente pago.',
+    desc: 'Confirma o pagamento de um reembolso aprovado.',
     quem: 'admin_principal, veneravel_mestre, financeiro',
     cor: '#059669',
     campos: [
@@ -292,29 +289,23 @@ const FUNCIONALIDADES = {
       { id: 'f_valor',  label: 'Valor Pago',       tipo: 'text',   valor: '' },
       { id: 'f_obs',    label: 'Observação',        tipo: 'text',   valor: '' },
     ],
-    acao: async (c) => api('POST', `/reembolsos/${c.f_reemb}/pagar`, {
+    acao: async (c) => api('POST', `/reimbursements/${c.f_reemb}/pay`, {
       valor_aprovado: c.f_valor || null, observacao_financeiro: c.f_obs || null,
     }),
   },
   upload_arquivo: {
     icone: '📁', titulo: 'Enviar Arquivo',
-    desc: 'Faz o upload de documentos e comprovantes, gerando hash SHA-256 para garantir integridade.',
+    desc: 'Use o módulo Repositório na barra lateral para enviar arquivos com upload completo.',
     quem: 'admin, veneravel, 1º/2º vigilante, secretário, financeiro',
     cor: '#475569',
     campos: [
-      { id: 'f_loja',     label: 'ID da Loja',     tipo: 'number', valor: '1' },
-      { id: 'f_nome',     label: 'Nome do Arquivo', tipo: 'text',   valor: '' },
-      { id: 'f_tipo',     label: 'Tipo MIME',       tipo: 'text',   valor: 'application/pdf' },
-      { id: 'f_tamanho',  label: 'Tamanho (bytes)', tipo: 'number', valor: '0' },
+      { id: 'f_info', label: 'Dica', tipo: 'text', valor: 'Use o módulo Repositório →' },
     ],
-    acao: async (c) => api('POST', '/arquivos', {
-      loja_id: +c.f_loja, nome_original: c.f_nome,
-      mime_type: c.f_tipo, tamanho_bytes: +c.f_tamanho,
-    }),
+    acao: async () => { abrirModulo('repositorio'); return { info: 'Redirecionado para o Repositório.' }; },
   },
   gerar_cobranca: {
     icone: '🧾', titulo: 'Gerar Cobrança',
-    desc: 'Emite uma cobrança vinculada a um contrato ativo, com competência e data de vencimento.',
+    desc: 'Emite uma cobrança vinculada a um contrato ativo.',
     quem: 'admin_principal, veneravel_mestre, financeiro',
     cor: '#b45309',
     campos: [
@@ -323,8 +314,9 @@ const FUNCIONALIDADES = {
       { id: 'f_valor',    label: 'Valor (R$)',         tipo: 'text',   valor: '' },
       { id: 'f_venc',     label: 'Vencimento (YYYY-MM-DD)', tipo: 'text', valor: '' },
     ],
-    acao: async (c) => api('POST', `/contratos/${c.f_contrato}/cobrancas`, {
-      competencia: c.f_comp, valor: c.f_valor, data_vencimento: c.f_venc,
+    acao: async (c) => api('POST', '/billings', {
+      contrato_id: +c.f_contrato, competencia: c.f_comp,
+      valor: c.f_valor, data_vencimento: c.f_venc,
     }),
   },
 };
@@ -433,7 +425,8 @@ async function login() {
 
 function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
-   'relatoriosView','permissoesView','comissoesView','repositorioView'].forEach(v => {
+   'relatoriosView','permissoesView','comissoesView','repositorioView',
+   'agendaView','irmaoDetalheView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -530,7 +523,7 @@ function abrirModulo(id) {
     cadastro_irmao: () => { mostrarView('irmaoView');     renderIrmaoView(); },
     boletos:        () => { mostrarView('irmaoView');     renderBoletosView(); },
     aniversarios:   () => { mostrarView('irmaoView');     renderAniversariosView(); },
-    agenda:         () => { mostrarView('irmaoView');     renderAgendaView(); },
+    agenda:         () => { mostrarView('agendaView');    renderAgendaView(); },
     compras:        () => { mostrarView('comprasView');    renderComprasView(); },
     rateio:         () => { mostrarView('rateioView');     renderRateioView(); },
     relatorios:     () => { mostrarView('relatoriosView'); renderRelatoriosView(); },
@@ -708,16 +701,16 @@ async function renderIrmaoView() {
       ? ir.filhos.map(f => `${f.nome} <span style="color:#94a3b8;font-size:11px">(${formatData(f.nasc)})</span>`).join(', ')
       : '—';
     return `
-      <div class="irmao-card">
+      <div class="irmao-card" onclick="abrirIrmao(${ir.id})" style="cursor:pointer" title="Ver perfil completo">
         <div class="irmao-card-top">
           <div class="irmao-avatar">${ini}</div>
           <div>
             <div class="irmao-card-name">${ir.nome}</div>
-            <div class="irmao-card-cim">CIM ${ir.cim} &nbsp;·&nbsp; ${ir.potencia} &nbsp;·&nbsp; ${ir.loja}</div>
+            <div class="irmao-card-cim">CIM ${ir.cim || '—'} &nbsp;·&nbsp; ${ir.potencia || '—'}</div>
           </div>
         </div>
         <div class="irmao-card-body">
-          <div>📱 <strong>WhatsApp:</strong> ${ir.tel}</div>
+          <div>📱 <strong>WhatsApp:</strong> ${ir.tel || '—'}</div>
           <div>🎂 <strong>Nascimento:</strong> ${formatData(ir.nascimento)}</div>
           <div>💍 <strong>Esposa:</strong> ${ir.esposa || '—'}</div>
           <div>👶 <strong>Filhos:</strong> ${filhosHtml}</div>
@@ -725,6 +718,7 @@ async function renderIrmaoView() {
         <div class="irmao-card-tags">
           ${tagMensalidade(ir.mensalidade)}
           ${anivProximo(ir.nascimento) ? '<span class="tag tag-aniv">🎂 Aniversário próximo</span>' : ''}
+          <span class="tag" style="background:#f0f9ff;color:#0369a1;border-color:#bae6fd;margin-top:4px">Ver perfil →</span>
         </div>
       </div>
     `;
@@ -1021,83 +1015,438 @@ async function notificarHoje() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  MÓDULO — AGENDA
+//  MÓDULO — AGENDA (CALENDÁRIO LOCAL)
 // ═══════════════════════════════════════════════════════════
 
+const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+                  'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const DIAS_PT_CURTO = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+let agendaState = {
+  ano: new Date().getFullYear(),
+  mes: new Date().getMonth() + 1,
+  diaSelecionado: null,
+  dados: null,
+};
+
 function renderAgendaView() {
-  const view = document.getElementById('irmaoView');
+  const view = document.getElementById('agendaView');
+  const pad = n => String(n).padStart(2,'0');
+  const hoje = new Date();
   view.innerHTML = `
-    <div class="irmao-header">
-      <h1>📅 Agenda</h1>
-      <button class="func-btn primary" onclick="document.getElementById('formEventoCard').style.display='block'">+ Novo evento</button>
-    </div>
-
-    <div class="form-card" id="formEventoCard" style="display:none">
-      <h2>Novo Evento</h2>
-      <div class="form-grid">
-        <div class="form-group" style="grid-column:1/-1"><label class="form-label">Título</label><input class="form-input" id="ev_titulo" type="text" placeholder="Ex: Sessão Magna" /></div>
-        <div class="form-group" style="grid-column:1/-1"><label class="form-label">Descrição</label><input class="form-input" id="ev_desc" type="text" /></div>
-        <div class="form-group"><label class="form-label">Início</label><input class="form-input" id="ev_inicio" type="datetime-local" /></div>
-        <div class="form-group"><label class="form-label">Fim</label><input class="form-input" id="ev_fim" type="datetime-local" /></div>
+    <div class="agenda-container">
+      <div class="irmao-header" style="margin-bottom:0">
+        <h1>📅 Agenda</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="func-btn primary" onclick="agendaToggleNovoEvento()">+ Evento avulso</button>
+          <button class="func-btn neutral" onclick="agendaToggleSessoes()">⚙ Sessões recorrentes</button>
+        </div>
       </div>
-      <div class="form-actions">
-        <button class="func-btn primary" onclick="criarEvento()">Criar no Google Calendar</button>
-        <button class="func-btn neutral" onclick="document.getElementById('formEventoCard').style.display='none'">Cancelar</button>
-      </div>
-      <pre class="modal-result" id="eventoResult" style="display:none"></pre>
-    </div>
 
-    <div class="form-card">
-      <h2>Próximos eventos</h2>
-      <div id="agendaLista" style="margin-top:12px">
-        <button class="func-btn neutral" onclick="carregarAgenda()">Carregar agenda</button>
+      <div class="agenda-mes-nav">
+        <button class="agenda-nav-btn" onclick="agendaMesAnterior()">◀</button>
+        <span class="agenda-mes-titulo" id="agendaMesTitulo">—</span>
+        <button class="agenda-nav-btn" onclick="agendaMesProximo()">▶</button>
       </div>
-    </div>
 
-    <div class="resp-card" style="margin-top:0;border-color:#fde68a;background:#fffbeb">
-      <div class="resp-card-icon">⚙️</div>
-      <div class="resp-card-title">Configuração necessária</div>
-      <div class="resp-card-desc">Para usar a agenda, configure <strong>google_credentials.json</strong> na raiz do projeto. Veja as instruções em <code>backend_services/calendar_service.py</code>.</div>
+      <div class="agenda-grid-wrap">
+        <div class="agenda-dias-semana">
+          ${DIAS_PT_CURTO.map(d => `<div>${d}</div>`).join('')}
+        </div>
+        <div class="agenda-dias" id="agendaDias">
+          <div class="agenda-loading">Carregando…</div>
+        </div>
+      </div>
+
+      <div class="agenda-dia-detalhe" id="agendaDiaDetalhe" style="display:none">
+        <div class="agenda-dia-detalhe-titulo" id="agendaDiaDetalheTitulo"></div>
+        <div id="agendaDiaEventos"></div>
+      </div>
+
+      <div class="form-card" id="agendaFormEvento" style="display:none">
+        <h2>Novo Evento Avulso</h2>
+        <div class="form-grid">
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Título</label>
+            <input class="form-input" id="ae_titulo" type="text" placeholder="Ex: Reunião de Comissão" />
+          </div>
+          <div class="form-group"><label class="form-label">Data</label><input class="form-input" id="ae_data" type="date" value="${hoje.getFullYear()}-${pad(hoje.getMonth()+1)}-${pad(hoje.getDate())}" /></div>
+          <div class="form-group"><label class="form-label">Hora início</label><input class="form-input" id="ae_inicio" type="time" value="20:00" /></div>
+          <div class="form-group"><label class="form-label">Hora fim</label><input class="form-input" id="ae_fim" type="time" value="22:00" /></div>
+          <div class="form-group">
+            <label class="form-label">Tipo</label>
+            <select class="form-select" id="ae_tipo">
+              <option value="evento">Evento</option><option value="sessao">Sessão</option>
+              <option value="especial">Especial</option><option value="agape">Ágape</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">Cor</label><input class="form-input" id="ae_cor" type="color" value="#7c3aed" /></div>
+          <div class="form-group" style="grid-column:1/-1"><label class="form-label">Local (opcional)</label><input class="form-input" id="ae_local" type="text" /></div>
+          <div class="form-group" style="grid-column:1/-1"><label class="form-label">Descrição (opcional)</label><input class="form-input" id="ae_desc" type="text" /></div>
+        </div>
+        <div class="form-actions">
+          <button class="func-btn primary" onclick="agendaSalvarEvento()">Salvar evento</button>
+          <button class="func-btn neutral" onclick="agendaToggleNovoEvento()">Cancelar</button>
+        </div>
+        <pre class="modal-result" id="agendaEventoResult" style="display:none"></pre>
+      </div>
+
+      <div class="form-card" id="agendaPanelSessoes" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h2>Sessões Recorrentes</h2>
+          <button class="func-btn primary" onclick="agendaToggleFormSessao()">+ Nova sessão</button>
+        </div>
+
+        <div id="agendaFormSessao" style="display:none;margin-bottom:20px;padding:16px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1"><label class="form-label">Título</label><input class="form-input" id="ss_titulo" type="text" placeholder="Ex: Sessão Ordinária" /></div>
+            <div class="form-group">
+              <label class="form-label">Tipo</label>
+              <select class="form-select" id="ss_tipo">
+                <option value="sessao">Sessão</option><option value="agape">Ágape</option>
+                <option value="administrativa">Administrativa</option><option value="especial">Especial</option>
+              </select>
+            </div>
+            <div class="form-group"><label class="form-label">Cor</label><input class="form-input" id="ss_cor" type="color" value="#2563eb" /></div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">Frequência</label>
+              <select class="form-select" id="ss_freq" onchange="agendaAtualizarCamposFreq()">
+                <option value="semanal">Toda semana</option>
+                <option value="quinzenal">A cada 2 semanas</option>
+                <option value="mensal_dia_semana">Mensal — dia da semana (ex: 1ª Segunda)</option>
+                <option value="mensal_dia_numero">Mensal — dia fixo (ex: dia 15)</option>
+              </select>
+            </div>
+            <div class="form-group" id="ss_campo_dia_semana">
+              <label class="form-label">Dia da semana</label>
+              <select class="form-select" id="ss_dia_semana">
+                <option value="0">Domingo</option><option value="1">Segunda</option>
+                <option value="2">Terça</option><option value="3">Quarta</option>
+                <option value="4">Quinta</option><option value="5">Sexta</option><option value="6">Sábado</option>
+              </select>
+            </div>
+            <div class="form-group" id="ss_campo_semana_mes" style="display:none">
+              <label class="form-label">Semana do mês</label>
+              <select class="form-select" id="ss_semana_mes">
+                <option value="1">1ª semana</option><option value="2">2ª semana</option>
+                <option value="3">3ª semana</option><option value="4">4ª semana</option>
+              </select>
+            </div>
+            <div class="form-group" id="ss_campo_dia_mes" style="display:none">
+              <label class="form-label">Dia do mês</label>
+              <input class="form-input" id="ss_dia_mes" type="number" min="1" max="31" value="1" />
+            </div>
+            <div class="form-group"><label class="form-label">Hora início</label><input class="form-input" id="ss_inicio" type="time" value="20:00" /></div>
+            <div class="form-group"><label class="form-label">Hora fim</label><input class="form-input" id="ss_fim" type="time" value="22:00" /></div>
+            <div class="form-group"><label class="form-label">Vigência início</label><input class="form-input" id="ss_vig_ini" type="date" value="${hoje.getFullYear()}-${pad(hoje.getMonth()+1)}-${pad(hoje.getDate())}" /></div>
+            <div class="form-group"><label class="form-label">Vigência fim (opcional)</label><input class="form-input" id="ss_vig_fim" type="date" /></div>
+          </div>
+          <div class="form-actions">
+            <button class="func-btn primary" onclick="agendaSalvarSessao()">Salvar sessão</button>
+            <button class="func-btn neutral" onclick="agendaToggleFormSessao()">Cancelar</button>
+          </div>
+          <pre class="modal-result" id="agendaSessaoResult" style="display:none"></pre>
+        </div>
+
+        <div id="agendaListaSessoes"><div style="color:#94a3b8;font-size:14px">Carregando…</div></div>
+      </div>
     </div>
   `;
+  agendaCarregarMes();
 }
 
-async function criarEvento() {
-  const res = document.getElementById('eventoResult');
-  res.style.display = 'block'; res.className = 'modal-result'; res.textContent = 'Criando…';
-  const tz = '-03:00';
+async function agendaCarregarMes() {
+  const loja = state.usuario?.loja_id || 1;
+  const titulo = document.getElementById('agendaMesTitulo');
+  if (titulo) titulo.textContent = `${MESES_PT[agendaState.mes - 1]} ${agendaState.ano}`;
+  const el = document.getElementById('agendaDias');
+  if (!el) return;
+  el.innerHTML = '<div class="agenda-loading">Carregando…</div>';
   try {
-    const d = await api('POST', '/agenda', {
-      titulo:   document.getElementById('ev_titulo').value,
-      descricao:document.getElementById('ev_desc').value,
-      inicio:   document.getElementById('ev_inicio').value + ':00' + tz,
-      fim:      document.getElementById('ev_fim').value + ':00' + tz,
-    });
-    res.className = 'modal-result ok';
-    res.textContent = 'Evento criado!\n' + JSON.stringify(d, null, 2);
-  } catch (e) { res.className = 'modal-result error'; res.textContent = e.message; }
+    const dados = await api('GET', `/agenda/mes?loja_id=${loja}&ano=${agendaState.ano}&mes=${agendaState.mes}`);
+    agendaState.dados = dados;
+    agendaRenderGrid(dados);
+  } catch (e) {
+    el.innerHTML = `<div style="color:#dc2626;padding:20px;font-size:14px">Erro: ${e.message}</div>`;
+  }
 }
 
-async function carregarAgenda() {
-  const el = document.getElementById('agendaLista');
-  el.textContent = 'Carregando…';
-  try {
-    const data = await api('GET', '/agenda?dias=60');
-    if (!data.length) { el.textContent = 'Nenhum evento nos próximos 60 dias.'; return; }
-    el.innerHTML = data.map(ev => {
-      const inicio = ev.start?.dateTime || ev.start?.date || '';
-      return `
-        <div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #e2e8f0">
-          <div style="font-size:22px">📅</div>
+function agendaRenderGrid(dados) {
+  const el = document.getElementById('agendaDias');
+  if (!el) return;
+  const { num_dias, primeiro_dia_semana, dias } = dados;
+  const hoje = new Date();
+  let html = '';
+  for (let i = 0; i < primeiro_dia_semana; i++) html += '<div class="agenda-cel vazio"></div>';
+  for (let d = 1; d <= num_dias; d++) {
+    const eventos = dias[String(d)] || [];
+    const sel = agendaState.diaSelecionado === d;
+    const isHoje = d === hoje.getDate() && agendaState.mes === (hoje.getMonth()+1) && agendaState.ano === hoje.getFullYear();
+    const cores = [...new Set(eventos.map(ev => ev.cor || '#2563eb'))].slice(0,3);
+    const dots = cores.map(c => `<span class="agenda-dot" style="background:${c}"></span>`).join('');
+    html += `<div class="agenda-cel${sel?' selecionado':''}${isHoje?' hoje':''}" onclick="agendaClicarDia(${d})">
+      <span class="agenda-cel-num">${d}</span>
+      <div class="agenda-dots">${dots}</div>
+    </div>`;
+  }
+  el.innerHTML = html;
+  if (agendaState.diaSelecionado) agendaRenderDiaDetalhe(agendaState.diaSelecionado);
+}
+
+function agendaClicarDia(d) {
+  agendaState.diaSelecionado = agendaState.diaSelecionado === d ? null : d;
+  agendaRenderGrid(agendaState.dados);
+  const det = document.getElementById('agendaDiaDetalhe');
+  if (agendaState.diaSelecionado) {
+    agendaRenderDiaDetalhe(d);
+    det.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  } else { det.style.display = 'none'; }
+}
+
+function agendaRenderDiaDetalhe(d) {
+  const det = document.getElementById('agendaDiaDetalhe');
+  if (!det) return;
+  document.getElementById('agendaDiaDetalheTitulo').textContent =
+    `${d} de ${MESES_PT[agendaState.mes - 1]} de ${agendaState.ano}`;
+  const eventos = agendaState.dados?.dias?.[String(d)] || [];
+  const eventoEl = document.getElementById('agendaDiaEventos');
+  if (!eventos.length) {
+    eventoEl.innerHTML = '<div style="color:#94a3b8;font-size:14px;padding:8px 0">Nenhum evento neste dia.</div>';
+  } else {
+    eventoEl.innerHTML = eventos.map(ev => `
+      <div class="agenda-evento-item" style="border-left:3px solid ${ev.cor||'#2563eb'}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
-            <div style="font-weight:700;font-size:14px">${ev.summary}</div>
-            <div style="font-size:12px;color:#64748b">${inicio ? new Date(inicio).toLocaleString('pt-BR') : ''}</div>
-            ${ev.description ? `<div style="font-size:12px;color:#475569;margin-top:3px">${ev.description}</div>` : ''}
+            <div class="agenda-evento-hora">${ev.hora_inicio}–${ev.hora_fim}</div>
+            <div class="agenda-evento-titulo">${ev.titulo}</div>
+            ${ev.descricao ? `<div class="agenda-evento-desc">${ev.descricao}</div>` : ''}
+            ${ev.local     ? `<div class="agenda-evento-desc">📍 ${ev.local}</div>` : ''}
+            ${ev.freq_label? `<div class="agenda-evento-desc">🔄 ${ev.freq_label}</div>` : ''}
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+            <span class="tag" style="background:${ev.cor||'#2563eb'}18;color:${ev.cor||'#2563eb'};border-color:${ev.cor||'#2563eb'}33">${ev.tipo_fonte==='recorrente'?'Recorrente':'Avulso'}</span>
+            ${ev.tipo_fonte==='avulso' ? `<button class="func-btn danger" style="font-size:11px;padding:2px 8px" onclick="agendaDeletarEvento(${ev.id})">Remover</button>` : ''}
           </div>
         </div>
-      `;
-    }).join('');
-  } catch (e) { el.textContent = 'Erro: ' + e.message; }
+      </div>
+    `).join('');
+  }
+  det.style.display = 'block';
+}
+
+function agendaMesAnterior() {
+  if (agendaState.mes===1){agendaState.mes=12;agendaState.ano--;}else agendaState.mes--;
+  agendaState.diaSelecionado = null;
+  agendaCarregarMes();
+}
+function agendaMesProximo() {
+  if (agendaState.mes===12){agendaState.mes=1;agendaState.ano++;}else agendaState.mes++;
+  agendaState.diaSelecionado = null;
+  agendaCarregarMes();
+}
+function agendaToggleNovoEvento() {
+  const el = document.getElementById('agendaFormEvento');
+  el.style.display = el.style.display==='none' ? 'block' : 'none';
+}
+function agendaToggleSessoes() {
+  const el = document.getElementById('agendaPanelSessoes');
+  const show = el.style.display==='none';
+  el.style.display = show ? 'block' : 'none';
+  if (show) agendaCarregarSessoes();
+}
+function agendaToggleFormSessao() {
+  const el = document.getElementById('agendaFormSessao');
+  el.style.display = el.style.display==='none' ? 'block' : 'none';
+}
+function agendaAtualizarCamposFreq() {
+  const freq = document.getElementById('ss_freq').value;
+  document.getElementById('ss_campo_dia_semana').style.display = freq==='mensal_dia_numero' ? 'none' : 'block';
+  document.getElementById('ss_campo_semana_mes').style.display = freq==='mensal_dia_semana' ? 'block' : 'none';
+  document.getElementById('ss_campo_dia_mes').style.display    = freq==='mensal_dia_numero' ? 'block' : 'none';
+}
+
+async function agendaSalvarEvento() {
+  const res = document.getElementById('agendaEventoResult');
+  res.style.display='block'; res.className='modal-result'; res.textContent='Salvando…';
+  const loja = state.usuario?.loja_id || 1;
+  try {
+    await api('POST', `/agenda/eventos-locais?loja_id=${loja}`, {
+      titulo:      document.getElementById('ae_titulo').value.trim(),
+      descricao:   document.getElementById('ae_desc').value.trim() || null,
+      tipo:        document.getElementById('ae_tipo').value,
+      data:        document.getElementById('ae_data').value,
+      hora_inicio: document.getElementById('ae_inicio').value,
+      hora_fim:    document.getElementById('ae_fim').value,
+      local:       document.getElementById('ae_local').value.trim() || null,
+      cor:         document.getElementById('ae_cor').value,
+    });
+    res.className='modal-result ok'; res.textContent='Evento salvo!';
+    agendaCarregarMes();
+    setTimeout(()=>{ agendaToggleNovoEvento(); res.style.display='none'; }, 1200);
+  } catch(e) { res.className='modal-result error'; res.textContent='⚠ '+(e.data?.detail||e.message); }
+}
+
+async function agendaSalvarSessao() {
+  const res = document.getElementById('agendaSessaoResult');
+  res.style.display='block'; res.className='modal-result'; res.textContent='Salvando…';
+  const loja = state.usuario?.loja_id || 1;
+  const freq = document.getElementById('ss_freq').value;
+  try {
+    await api('POST', `/agenda/sessoes?loja_id=${loja}`, {
+      titulo:          document.getElementById('ss_titulo').value.trim(),
+      tipo:            document.getElementById('ss_tipo').value,
+      frequencia:      freq,
+      dia_semana:      freq!=='mensal_dia_numero' ? +document.getElementById('ss_dia_semana').value : null,
+      semana_mes:      freq==='mensal_dia_semana' ? +document.getElementById('ss_semana_mes').value : null,
+      dia_mes:         freq==='mensal_dia_numero' ? +document.getElementById('ss_dia_mes').value : null,
+      hora_inicio:     document.getElementById('ss_inicio').value,
+      hora_fim:        document.getElementById('ss_fim').value,
+      cor:             document.getElementById('ss_cor').value,
+      vigencia_inicio: document.getElementById('ss_vig_ini').value || null,
+      vigencia_fim:    document.getElementById('ss_vig_fim').value || null,
+    });
+    res.className='modal-result ok'; res.textContent='Sessão salva!';
+    agendaCarregarSessoes();
+    agendaCarregarMes();
+    setTimeout(()=>{ agendaToggleFormSessao(); res.style.display='none'; }, 1200);
+  } catch(e) { res.className='modal-result error'; res.textContent='⚠ '+(e.data?.detail||e.message); }
+}
+
+async function agendaCarregarSessoes() {
+  const el = document.getElementById('agendaListaSessoes');
+  if (!el) return;
+  const loja = state.usuario?.loja_id || 1;
+  el.innerHTML = '<div style="color:#94a3b8;font-size:14px">Carregando…</div>';
+  try {
+    const sessoes = await api('GET', `/agenda/sessoes?loja_id=${loja}&apenas_ativas=false`);
+    if (!sessoes.length) {
+      el.innerHTML = '<div style="color:#94a3b8;font-size:14px">Nenhuma sessão recorrente cadastrada.</div>';
+      return;
+    }
+    el.innerHTML = sessoes.map(s => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="width:10px;height:10px;border-radius:50%;background:${s.cor};flex-shrink:0;display:inline-block"></span>
+          <div>
+            <div style="font-weight:600;font-size:14px">${s.titulo}</div>
+            <div style="font-size:12px;color:#64748b">${agendaFreqLabel(s)} · ${String(s.hora_inicio).slice(0,5)}–${String(s.hora_fim).slice(0,5)}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;padding:2px 8px;border-radius:12px;background:${s.ativo?'#dcfce7':'#fee2e2'};color:${s.ativo?'#16a34a':'#dc2626'}">${s.ativo?'Ativa':'Inativa'}</span>
+          <button class="func-btn danger" style="font-size:11px;padding:2px 8px" onclick="agendaDeletarSessao(${s.id})">Remover</button>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) { el.innerHTML = `<div style="color:#dc2626;font-size:14px">Erro: ${e.message}</div>`; }
+}
+
+function agendaFreqLabel(s) {
+  const dias = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const dw = s.dia_semana != null ? dias[s.dia_semana] : '';
+  if (s.frequencia==='semanal') return `Toda ${dw}`;
+  if (s.frequencia==='quinzenal') return `A cada 2 ${dw}s`;
+  if (s.frequencia==='mensal_dia_semana') { const o=['1ª','2ª','3ª','4ª','5ª']; return `${o[(s.semana_mes||1)-1]} ${dw} do mês`; }
+  if (s.frequencia==='mensal_dia_numero') return `Todo dia ${s.dia_mes}`;
+  return s.frequencia;
+}
+
+async function agendaDeletarEvento(id) {
+  if (!confirm('Remover este evento?')) return;
+  try { await api('DELETE', `/agenda/eventos-locais/${id}`); agendaState.diaSelecionado=null; agendaCarregarMes(); }
+  catch(e) { alert('Erro: '+e.message); }
+}
+async function agendaDeletarSessao(id) {
+  if (!confirm('Remover esta sessão recorrente?')) return;
+  try { await api('DELETE', `/agenda/sessoes/${id}`); agendaCarregarSessoes(); agendaCarregarMes(); }
+  catch(e) { alert('Erro: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PERFIL DO IRMÃO
+// ═══════════════════════════════════════════════════════════
+
+async function abrirIrmao(id) {
+  mostrarView('irmaoDetalheView');
+  const view = document.getElementById('irmaoDetalheView');
+  view.innerHTML = '<div style="padding:40px;text-align:center;color:#64748b">Carregando perfil…</div>';
+  try {
+    const ir = await api('GET', `/irmaos/${id}`);
+    renderIrmaoDetalhe(ir);
+  } catch(e) {
+    view.innerHTML = `<div style="padding:40px;color:#dc2626">Erro ao carregar: ${e.message}</div>`;
+  }
+}
+
+function renderIrmaoDetalhe(ir) {
+  const view = document.getElementById('irmaoDetalheView');
+  const ini = (ir.nome || '?')[0].toUpperCase();
+  const cargo = CARGOS.find(c => c.id === ir.cargo);
+
+  const filhosHtml = (ir.filhos || []).length
+    ? (ir.filhos).map(f => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f1f5f9">
+          <span>👶</span>
+          <div>
+            <div style="font-weight:600;font-size:13px">${f.nome}</div>
+            ${f.data_nascimento ? `<div style="font-size:12px;color:#64748b">${formatData(f.data_nascimento)}${anivProximo(f.data_nascimento)?' 🎂':''}</div>` : ''}
+          </div>
+        </div>`).join('')
+    : '<div style="color:#94a3b8;font-size:13px;padding:6px 0">—</div>';
+
+  const comissoesHtml = (ir.comissoes || []).length
+    ? ir.comissoes.map(c => `<span class="tag" style="background:#e0e7ff;color:#3730a3;border-color:#c7d2fe">${c.nome}${c.funcao?' · '+c.funcao:''}</span>`).join('')
+    : '<span style="color:#94a3b8;font-size:13px">—</span>';
+
+  view.innerHTML = `
+    <div style="max-width:900px;margin:0 auto;padding:24px 16px">
+      <button class="func-btn neutral" style="margin-bottom:20px" onclick="abrirModulo('cadastro_irmao')">← Voltar à lista</button>
+
+      <div style="display:flex;align-items:center;gap:20px;margin-bottom:24px;padding:24px;background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);border:1px solid #e2e8f0">
+        <div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;font-size:28px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${ini}</div>
+        <div style="flex:1;min-width:0">
+          <h1 style="font-size:22px;font-weight:700;margin:0 0 6px">${ir.nome}</h1>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${ir.cim ? `<span class="tag tag-regular">CIM ${ir.cim}</span>` : ''}
+            ${ir.potencia ? `<span class="tag tag-regular">${ir.potencia}</span>` : ''}
+            ${cargo ? `<span class="tag" style="background:${cargo.cor}18;color:${cargo.cor};border-color:${cargo.cor}33">${cargo.icone} ${cargo.label}</span>` : ir.cargo ? `<span class="tag tag-regular">${ir.cargo}</span>` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div class="irmao-detalhe-grid">
+        <div class="form-card">
+          <h2>Dados Pessoais</h2>
+          <div class="irmao-detalhe-campos">
+            <div class="irmao-detalhe-campo"><span class="irmao-campo-label">📱 WhatsApp</span><span>${ir.telefone || '—'}</span></div>
+            <div class="irmao-detalhe-campo"><span class="irmao-campo-label">🎂 Nascimento</span><span>${formatData(ir.data_nascimento)}${anivProximo(ir.data_nascimento)?' 🎂':''}</span></div>
+            <div class="irmao-detalhe-campo"><span class="irmao-campo-label">💍 Esposa</span><span>${ir.nome_esposa || '—'}${ir.data_nascimento_esposa ? ` <span style="color:#64748b;font-size:12px">(${formatData(ir.data_nascimento_esposa)}${anivProximo(ir.data_nascimento_esposa)?' 🎂':''})</span>` : ''}</span></div>
+            <div class="irmao-detalhe-campo"><span class="irmao-campo-label">📧 E-mail</span><span>${ir.usuario_email || '—'}</span></div>
+          </div>
+        </div>
+
+        <div class="form-card">
+          <h2>Filhos (${(ir.filhos||[]).length})</h2>
+          ${filhosHtml}
+        </div>
+
+        <div class="form-card">
+          <h2>Mensalidade</h2>
+          ${ir.mensalidade ? `
+            <div class="irmao-detalhe-campos">
+              <div class="irmao-detalhe-campo"><span class="irmao-campo-label">Categoria</span><span>${ir.mensalidade.categoria}</span></div>
+              <div class="irmao-detalhe-campo"><span class="irmao-campo-label">Valor</span><span>R$ ${Number(ir.mensalidade.valor||0).toFixed(2)}</span></div>
+              <div class="irmao-detalhe-campo"><span class="irmao-campo-label">Vigência</span><span>${formatData(ir.mensalidade.vigencia_inicio)}${ir.mensalidade.vigencia_fim?' – '+formatData(ir.mensalidade.vigencia_fim):''}</span></div>
+            </div>` : '<div style="color:#94a3b8;font-size:13px">Nenhuma regra definida.</div>'}
+        </div>
+
+        <div class="form-card">
+          <h2>Comissões</h2>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${comissoesHtml}</div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1106,27 +1455,35 @@ async function carregarAgenda() {
 
 let modalFuncId = null;
 
-function abrirModal(fid) {
-  const f = FUNCIONALIDADES[fid];
-  if (!f) return;
-  modalFuncId = fid;
-
-  document.getElementById('modalTitle').textContent = `${f.icone} ${f.titulo}`;
-
-  const body = document.getElementById('modalBody');
-  body.innerHTML = f.campos.map(campo => `
-    <div>
-      <div class="modal-label">${campo.label}</div>
-      <input class="modal-input" id="${campo.id}" type="${campo.tipo}" value="${campo.valor}" placeholder="${campo.label}" />
-    </div>
-  `).join('') + `<pre class="modal-result" id="modalResult" style="display:none"></pre>`;
-
-  const footer = document.getElementById('modalFooter');
-  footer.innerHTML = `
-    <button class="func-btn neutral" onclick="fecharModal()">Cancelar</button>
-    <button class="func-btn primary" id="modalExecBtn" onclick="executarModal()">Executar</button>
-  `;
-
+// abrirModal suporta dois modos:
+//   abrirModal(fid)                    → modal de funcionalidade de cargo
+//   abrirModal(titulo, corpo, botoes)  → modal genérico (comissões, etc.)
+function abrirModal(fidOuTitulo, corpo, botoes) {
+  if (corpo !== undefined) {
+    // Modo genérico
+    modalFuncId = null;
+    document.getElementById('modalTitle').textContent = fidOuTitulo;
+    document.getElementById('modalBody').innerHTML = corpo;
+    document.getElementById('modalFooter').innerHTML = (botoes || []).map(b =>
+      `<button class="func-btn ${b.cls}" onclick="${b.action}">${b.label}</button>`
+    ).join('');
+  } else {
+    // Modo funcionalidade de cargo
+    const f = FUNCIONALIDADES[fidOuTitulo];
+    if (!f) return;
+    modalFuncId = fidOuTitulo;
+    document.getElementById('modalTitle').textContent = `${f.icone} ${f.titulo}`;
+    document.getElementById('modalBody').innerHTML = f.campos.map(campo => `
+      <div>
+        <div class="modal-label">${campo.label}</div>
+        <input class="modal-input" id="${campo.id}" type="${campo.tipo}" value="${campo.valor}" placeholder="${campo.label}" />
+      </div>
+    `).join('') + `<pre class="modal-result" id="modalResult" style="display:none"></pre>`;
+    document.getElementById('modalFooter').innerHTML = `
+      <button class="func-btn neutral" onclick="fecharModal()">Cancelar</button>
+      <button class="func-btn primary" id="modalExecBtn" onclick="executarModal()">Executar</button>
+    `;
+  }
   document.getElementById('modalOverlay').style.display = 'flex';
 }
 
@@ -1790,20 +2147,6 @@ async function submitUploadRepositorio() {
 // ═══════════════════════════════════════════════════════════
 //  HELPER: modal genérico com botões
 // ═══════════════════════════════════════════════════════════
-
-function abrirModal(titulo, corpo, botoes) {
-  document.getElementById('modalTitle').textContent = titulo;
-  document.getElementById('modalBody').innerHTML   = corpo;
-  document.getElementById('modalFooter').innerHTML = botoes.map(b =>
-    `<button class="func-btn ${b.cls}" onclick="${b.action}">${b.label}</button>`
-  ).join('');
-  document.getElementById('modalOverlay').style.display = 'flex';
-}
-
-function fecharModal() {
-  document.getElementById('modalOverlay').style.display = 'none';
-}
-
 
 // ═══════════════════════════════════════════════════════════
 //  COMISSÕES

@@ -4,6 +4,7 @@ import secrets
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
+from backend_services.agenda_service import AgendaService
 from backend_services.audit_service import AuditService
 from backend_services.auth_service import AuthService
 from backend_services.core_transaction_services import CoreTransactionServices
@@ -39,6 +40,7 @@ _rateio_service = None
 _relatorios_service = None
 _permissoes_service = None
 _comissoes_service = None
+_agenda_service = None
 _basic_security = HTTPBasic()
 
 
@@ -173,6 +175,13 @@ def get_comissoes_service():
             whatsapp_service=get_whatsapp_service(),
         )
     return _comissoes_service
+
+
+def get_agenda_service():
+    global _agenda_service
+    if _agenda_service is None:
+        _agenda_service = AgendaService(db=get_database())
+    return _agenda_service
 
 
 def get_current_actor(

@@ -18,3 +18,5 @@
 \i 018_create_compras_rateio.sql
 \i 019_permissions_comissoes.sql
 \i 020_repositorio_arquivos.sql
+\i 021_sessoes_recorrentes.sql
+\i 022_irmaos_usuario_id.sql

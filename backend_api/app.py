@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend_api.dependencies import (
+    get_agenda_service,
     get_birthday_service,
     get_boleto_processor,
     get_calendar_service,
@@ -29,6 +30,7 @@ from backend_api.dependencies import (
     get_services,
     get_whatsapp_service,
 )
+from backend_services.agenda_service import AgendaService
 from backend_services.comissoes_service import ComissoesService
 from backend_services.compras_service import ComprasService
 from backend_services.permissoes_service import PermissoesService
@@ -836,6 +838,111 @@ def deletar_evento(
 
 
 # ═══════════════════════════════════════════════════════════
+#  AGENDA LOCAL (SESSÕES RECORRENTES + EVENTOS AVULSOS)
+# ═══════════════════════════════════════════════════════════
+
+class SessaoInput(BaseModel):
+    titulo: str
+    descricao: Optional[str] = None
+    tipo: str = "sessao"
+    frequencia: str
+    dia_semana: Optional[int] = None
+    semana_mes: Optional[int] = None
+    dia_mes: Optional[int] = None
+    hora_inicio: str
+    hora_fim: str
+    cor: str = "#2563eb"
+    vigencia_inicio: Optional[str] = None
+    vigencia_fim: Optional[str] = None
+    ativo: bool = True
+
+
+class EventoLocalInput(BaseModel):
+    titulo: str
+    descricao: Optional[str] = None
+    tipo: str = "evento"
+    data: str
+    hora_inicio: str
+    hora_fim: str
+    local: Optional[str] = None
+    cor: str = "#7c3aed"
+
+
+@app.get("/agenda/mes")
+def agenda_mes(
+    loja_id: int = Query(...),
+    ano: int = Query(...),
+    mes: int = Query(...),
+    actor: Actor = Depends(get_current_actor),
+    svc: AgendaService = Depends(get_agenda_service),
+):
+    return svc.mes(loja_id, ano, mes)
+
+
+@app.get("/agenda/sessoes")
+def listar_sessoes(
+    loja_id: int = Query(...),
+    apenas_ativas: bool = Query(default=True),
+    actor: Actor = Depends(get_current_actor),
+    svc: AgendaService = Depends(get_agenda_service),
+):
+    return svc.listar_sessoes(loja_id, apenas_ativas)
+
+
+@app.post("/agenda/sessoes", status_code=201)
+def criar_sessao(
+    loja_id: int = Query(...),
+    payload: SessaoInput = ...,
+    actor: Actor = Depends(get_current_actor),
+    svc: AgendaService = Depends(get_agenda_service),
+):
+    sid = svc.criar_sessao(loja_id, payload.model_dump())
+    return {"id": sid}
+
+
+@app.put("/agenda/sessoes/{sessao_id}")
+def atualizar_sessao(
+    sessao_id: int,
+    payload: SessaoInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: AgendaService = Depends(get_agenda_service),
+):
+    svc.atualizar_sessao(sessao_id, payload.model_dump())
+    return {"status": "updated"}
+
+
+@app.delete("/agenda/sessoes/{sessao_id}")
+def deletar_sessao(
+    sessao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: AgendaService = Depends(get_agenda_service),
+):
+    svc.deletar_sessao(sessao_id)
+    return {"status": "deleted"}
+
+
+@app.post("/agenda/eventos-locais", status_code=201)
+def criar_evento_local(
+    loja_id: int = Query(...),
+    payload: EventoLocalInput = ...,
+    actor: Actor = Depends(get_current_actor),
+    svc: AgendaService = Depends(get_agenda_service),
+):
+    eid = svc.criar_evento(loja_id, payload.model_dump(), actor.user_id)
+    return {"id": eid}
+
+
+@app.delete("/agenda/eventos-locais/{evento_id}")
+def deletar_evento_local(
+    evento_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: AgendaService = Depends(get_agenda_service),
+):
+    svc.deletar_evento(evento_id)
+    return {"status": "deleted"}
+
+
+# ═══════════════════════════════════════════════════════════
 #  CENTROS DE CUSTO
 # ═══════════════════════════════════════════════════════════
 
@@ -1272,6 +1379,73 @@ def atribuir_cargo_irmao(
         svc.atribuir_cargo(payload.irmao_id, payload.cargo, loja_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "updated"}
+
+
+@app.get("/irmaos/{irmao_id}")
+def obter_irmao(
+    irmao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        irmao = tx.fetch_one(
+            """SELECT i.*, u.cargo, u.email AS usuario_email
+               FROM irmaos i
+               LEFT JOIN usuarios u ON u.id = i.usuario_id
+               WHERE i.id = %s""",
+            (irmao_id,),
+        )
+        if not irmao:
+            raise HTTPException(status_code=404, detail="Irmão não encontrado.")
+        filhos = tx.fetch_all(
+            "SELECT * FROM irmaos_filhos WHERE irmao_id = %s ORDER BY nome",
+            (irmao_id,),
+        )
+        mensalidade = tx.fetch_one(
+            """SELECT * FROM regras_mensalidade WHERE irmao_id = %s
+               ORDER BY vigencia_inicio DESC LIMIT 1""",
+            (irmao_id,),
+        )
+        comissoes = tx.fetch_all(
+            """SELECT c.id, c.nome, cm.funcao, cm.data_inicio, cm.data_fim
+               FROM comissoes_membros cm
+               JOIN comissoes c ON c.id = cm.comissao_id
+               WHERE cm.irmao_id = %s AND cm.ativo = TRUE AND c.ativo = TRUE
+               ORDER BY c.nome""",
+            (irmao_id,),
+        )
+    return {
+        **dict(irmao),
+        "filhos": list(filhos),
+        "mensalidade": dict(mensalidade) if mensalidade else None,
+        "comissoes": list(comissoes),
+    }
+
+
+@app.put("/irmaos/{irmao_id}")
+def atualizar_irmao(
+    irmao_id: int,
+    payload: CreateIrmaoInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            """UPDATE irmaos SET nome=%s, telefone=%s, cim=%s, potencia=%s,
+               data_nascimento=%s, nome_esposa=%s, data_nascimento_esposa=%s
+               WHERE id=%s""",
+            (payload.nome, payload.telefone, payload.cim, payload.potencia,
+             payload.data_nascimento, payload.nome_esposa, payload.data_nascimento_esposa,
+             irmao_id),
+        )
+        if payload.filhos:
+            tx.execute("DELETE FROM irmaos_filhos WHERE irmao_id=%s", (irmao_id,))
+            for f in payload.filhos:
+                tx.execute(
+                    "INSERT INTO irmaos_filhos (irmao_id, nome, data_nascimento) VALUES (%s,%s,%s)",
+                    (irmao_id, f.nome, f.data_nascimento),
+                )
     return {"status": "updated"}
 
 
