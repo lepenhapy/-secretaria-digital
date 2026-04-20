@@ -1275,6 +1275,137 @@ def atribuir_cargo_irmao(
     return {"status": "updated"}
 
 
+# ═══════════════════════════════════════════════════════════
+#  REPOSITÓRIO DE ARQUIVOS
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/repositorio")
+def listar_repositorio(
+    loja_id: int = Query(...),
+    contexto: Optional[str] = Query(default=None),
+    data_inicio: Optional[str] = Query(default=None),
+    data_fim: Optional[str] = Query(default=None),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    filters_comp = ["c.loja_id = %s"]
+    filters_repo = ["r.loja_id = %s"]
+    params_comp: list = [loja_id]
+    params_repo: list = [loja_id]
+
+    if data_inicio:
+        filters_comp.append("ca.criado_em >= %s"); params_comp.append(data_inicio)
+        filters_repo.append("r.criado_em >= %s");  params_repo.append(data_inicio)
+    if data_fim:
+        filters_comp.append("ca.criado_em <= %s"); params_comp.append(data_fim)
+        filters_repo.append("r.criado_em <= %s");  params_repo.append(data_fim)
+
+    wc = " AND ".join(filters_comp)
+    wr = " AND ".join(filters_repo)
+
+    with db.transaction() as tx:
+        compras_arqs = tx.fetch_all(
+            f"""SELECT ca.id, 'compra' AS contexto, c.id AS contexto_id,
+                       c.evento AS descricao, u.nome AS enviado_por,
+                       ca.tipo, ca.nome_original, ca.tamanho_bytes, ca.criado_em,
+                       ca.caminho IS NOT NULL AS disponivel
+                FROM compras_arquivos ca
+                JOIN compras c ON c.id = ca.compra_id
+                JOIN usuarios u ON u.id = c.usuario_id
+                WHERE {wc}
+                {'AND ca.tipo = %s' if contexto else ''}
+                ORDER BY ca.criado_em DESC""",
+            params_comp + ([contexto] if contexto else []),
+        )
+        repo_arqs = tx.fetch_all(
+            f"""SELECT r.id, r.contexto, r.contexto_id,
+                       r.descricao, u.nome AS enviado_por,
+                       COALESCE(r.mimetype, 'arquivo') AS tipo,
+                       r.nome_original, r.tamanho_bytes, r.criado_em,
+                       r.caminho IS NOT NULL AS disponivel
+                FROM repositorio_arquivos r
+                LEFT JOIN usuarios u ON u.id = r.usuario_id
+                WHERE {wr}
+                ORDER BY r.criado_em DESC""",
+            params_repo,
+        )
+
+    # Merge and sort
+    todos = list(compras_arqs) + list(repo_arqs)
+    todos.sort(key=lambda x: x["criado_em"] or "", reverse=True)
+
+    # Build download URLs
+    for item in todos:
+        if item["disponivel"]:
+            if item["contexto"] == "compra":
+                item["download_url"] = f"/compras/{item['contexto_id']}/arquivo/{item['id']}"
+            else:
+                item["download_url"] = f"/repositorio/{item['id']}/download"
+        else:
+            item["download_url"] = None
+
+    return todos
+
+
+@app.get("/repositorio/{arquivo_id}/download")
+def download_repositorio(
+    arquivo_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    import io
+    from fastapi.responses import StreamingResponse
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            "SELECT caminho, nome_original, mimetype FROM repositorio_arquivos WHERE id=%s",
+            (arquivo_id,),
+        )
+    if not row or not row["caminho"] or not os.path.exists(row["caminho"]):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    data = open(row["caminho"], "rb").read()
+    mime = row["mimetype"] or "application/octet-stream"
+    nome = row["nome_original"] or "arquivo"
+    return StreamingResponse(
+        io.BytesIO(data), media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@app.post("/repositorio/upload", status_code=201)
+async def upload_repositorio(
+    loja_id: int = Form(...),
+    descricao: str = Form(...),
+    contexto: str = Form(default="geral"),
+    arquivos: list[UploadFile] = File(...),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    import hashlib, uuid
+    from pathlib import Path
+    base = os.getenv("STORAGE_DIR", str(Path(__file__).parent.parent / "storage_uploads"))
+    salvos = []
+    for arq in arquivos:
+        content = await arq.read()
+        sha = hashlib.sha256(content).hexdigest()
+        ext = Path(arq.filename or "arquivo").suffix or ".bin"
+        fname = f"{uuid.uuid4().hex}{ext}"
+        fdir = Path(base) / str(loja_id) / "repositorio"
+        fdir.mkdir(parents=True, exist_ok=True)
+        fpath = str(fdir / fname)
+        Path(fpath).write_bytes(content)
+        with db.transaction() as tx:
+            row = tx.fetch_one(
+                """INSERT INTO repositorio_arquivos
+                   (loja_id, usuario_id, contexto, descricao, caminho, nome_original,
+                    mimetype, tamanho_bytes, sha256)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (loja_id, actor.user_id, contexto, descricao, fpath,
+                 arq.filename, arq.content_type, len(content), sha),
+            )
+        salvos.append({"id": row["id"], "nome": arq.filename})
+    return {"salvos": salvos}
+
+
 # ── WhatsApp: status da instância ─────────────────────────────────────────
 
 @app.get("/whatsapp/status")

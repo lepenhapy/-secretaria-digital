@@ -433,7 +433,7 @@ async function login() {
 
 function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
-   'relatoriosView','permissoesView','comissoesView'].forEach(v => {
+   'relatoriosView','permissoesView','comissoesView','repositorioView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -499,6 +499,9 @@ function renderSidebar() {
     <div class="sidebar-nav-module" id="nav-permissoes" onclick="abrirModulo('permissoes')">
       <span style="font-size:15px">🔐</span><span>Permissões</span>
     </div>
+    <div class="sidebar-nav-module" id="nav-repositorio" onclick="abrirModulo('repositorio')">
+      <span style="font-size:15px">🗄️</span><span>Repositório</span>
+    </div>
   `;
 
   // Cargos
@@ -531,8 +534,9 @@ function abrirModulo(id) {
     compras:        () => { mostrarView('comprasView');    renderComprasView(); },
     rateio:         () => { mostrarView('rateioView');     renderRateioView(); },
     relatorios:     () => { mostrarView('relatoriosView'); renderRelatoriosView(); },
-    comissoes:      () => { mostrarView('comissoesView');  renderComissoesView(); },
-    permissoes:     () => { mostrarView('permissoesView'); renderPermissoesView(); },
+    comissoes:      () => { mostrarView('comissoesView');   renderComissoesView(); },
+    permissoes:     () => { mostrarView('permissoesView');  renderPermissoesView(); },
+    repositorio:    () => { mostrarView('repositorioView'); renderRepositorioView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -673,40 +677,14 @@ const CATEGORIAS_MENSALIDADE = [
 ];
 
 // Dados de exemplo (serão substituídos por dados da API)
-const IRMAOS_EXEMPLO = [
-  {
-    nome: 'José da Silva',       cim: '12345', potencia: 'GOB', loja: 'Loja 1',
-    tel: '(11) 99999-0001', nascimento: '1968-03-14',
-    esposa: 'Maria da Silva', filhos: [{nome:'Carlos', nasc:'1995-07-20'},{nome:'Ana', nasc:'1998-11-03'}],
-    mensalidade: 'regular',
-  },
-  {
-    nome: 'Antonio Ferreira',    cim: '23456', potencia: 'GOB', loja: 'Loja 1',
-    tel: '(11) 99999-0002', nascimento: '1952-09-05',
-    esposa: 'Luíza Ferreira', filhos: [],
-    mensalidade: 'idoso',
-  },
-  {
-    nome: 'Ricardo Almeida',     cim: '34567', potencia: 'COMAB', loja: 'Loja 1',
-    tel: '(11) 99999-0003', nascimento: '1975-12-22',
-    esposa: null, filhos: [{nome:'Pedro', nasc:'2005-04-10'}],
-    mensalidade: 'potencia',
-  },
-  {
-    nome: 'Fernando Costa',      cim: '45678', potencia: 'GOB', loja: 'Loja 1',
-    tel: '(11) 99999-0004', nascimento: '1980-06-30',
-    esposa: 'Paula Costa', filhos: [],
-    mensalidade: 'especial',
-  },
-];
-
 function tagMensalidade(cat) {
   const c = CATEGORIAS_MENSALIDADE.find(x => x.id === cat);
   return c ? `<span class="tag ${c.tag}">${c.titulo}</span>` : '';
 }
 
-function renderIrmaoView() {
+async function renderIrmaoView() {
   const view = document.getElementById('irmaoView');
+  const loja = state.usuario?.loja_id || 1;
 
   const categoriaCards = CATEGORIAS_MENSALIDADE.map(c => `
     <div class="cat-card ${c.id}">
@@ -716,7 +694,15 @@ function renderIrmaoView() {
     </div>
   `).join('');
 
-  const irmaoCards = IRMAOS_EXEMPLO.map(ir => {
+  let irmaos = [];
+  try { irmaos = await api('GET', `/irmaos?loja_id=${loja}`); } catch(_) {}
+
+  const irmaoCards = irmaos.map(ir => {
+    // normalise field names from API
+    ir.filhos = ir.filhos || [];
+    ir.tel = ir.telefone || ir.whatsapp || '';
+    ir.nascimento = ir.data_nascimento || '';
+    ir.esposa = ir.nome_esposa || null;
     const ini = ir.nome[0].toUpperCase();
     const filhosHtml = ir.filhos.length
       ? ir.filhos.map(f => `${f.nome} <span style="color:#94a3b8;font-size:11px">(${formatData(f.nasc)})</span>`).join(', ')
@@ -812,7 +798,7 @@ function renderIrmaoView() {
     </div>
 
     <!-- Cards dos irmãos -->
-    <div class="section-title" style="margin-bottom:16px">Irmãos cadastrados (${IRMAOS_EXEMPLO.length})</div>
+    <div class="section-title" style="margin-bottom:16px">Irmãos cadastrados (${irmaos.length})</div>
     <div class="irmao-grid">${irmaoCards}</div>
   `;
 }
@@ -1141,7 +1127,7 @@ function abrirModal(fid) {
     <button class="func-btn primary" id="modalExecBtn" onclick="executarModal()">Executar</button>
   `;
 
-  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('modalOverlay').style.display = 'flex';
 }
 
 async function executarModal() {
@@ -1173,7 +1159,7 @@ async function executarModal() {
 }
 
 function fecharModal() {
-  document.getElementById('modalOverlay').classList.remove('open');
+  document.getElementById('modalOverlay').style.display = 'none';
   modalFuncId = null;
 }
 
@@ -1661,6 +1647,143 @@ function renderRelatAgenda(rows) {
         </tr>`).join('')}
       </tbody>
     </table>`;
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  REPOSITÓRIO DE ARQUIVOS
+// ═══════════════════════════════════════════════════════════
+
+async function renderRepositorioView() {
+  const el   = document.getElementById('repositorioView');
+  const loja = state.usuario?.loja_id || 1;
+  const hoje = new Date().toISOString().split('T')[0];
+  const m3   = new Date(new Date().setMonth(new Date().getMonth() - 3)).toISOString().split('T')[0];
+
+  el.innerHTML = `
+    <div class="view-header">
+      <h1>Repositório de Arquivos</h1>
+      <button class="btn-primary" onclick="abrirUploadRepositorio()">+ Enviar arquivo</button>
+    </div>
+    <div class="filtros-row">
+      <input type="date" id="rep_ini" value="${m3}" />
+      <input type="date" id="rep_fim" value="${hoje}" />
+      <select id="rep_ctx">
+        <option value="">Todos os tipos</option>
+        <option value="compra">Compras</option>
+        <option value="geral">Geral</option>
+      </select>
+      <button class="btn-primary" onclick="carregarRepositorio()">Filtrar</button>
+    </div>
+    <div id="repLista"><div class="loading">Carregando…</div></div>
+  `;
+  await carregarRepositorio();
+}
+
+async function carregarRepositorio() {
+  const loja = state.usuario?.loja_id || 1;
+  const ini  = document.getElementById('rep_ini')?.value || '';
+  const fim  = document.getElementById('rep_fim')?.value || '';
+  const ctx  = document.getElementById('rep_ctx')?.value || '';
+  const el   = document.getElementById('repLista');
+  if (!el) return;
+  el.innerHTML = '<div class="loading">Carregando…</div>';
+
+  try {
+    let q = `loja_id=${loja}`;
+    if (ini) q += `&data_inicio=${ini}`;
+    if (fim) q += `&data_fim=${fim}`;
+    if (ctx) q += `&contexto=${ctx}`;
+
+    const lista = await api('GET', `/repositorio?${q}`);
+
+    if (!lista.length) { el.innerHTML = '<p class="empty-msg">Nenhum arquivo encontrado.</p>'; return; }
+
+    el.innerHTML = `
+      <table class="relat-table">
+        <thead>
+          <tr>
+            <th>Data / Hora</th>
+            <th>Enviado por</th>
+            <th>Contexto</th>
+            <th>Descrição</th>
+            <th>Arquivo</th>
+            <th>Tamanho</th>
+            <th>Ação</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${lista.map(a => `
+            <tr>
+              <td style="white-space:nowrap">${new Date(a.criado_em).toLocaleString('pt-BR')}</td>
+              <td>${a.enviado_por || '—'}</td>
+              <td><span class="badge-ctx ${a.contexto}">${a.contexto}</span></td>
+              <td>${a.descricao || '—'}</td>
+              <td>${a.nome_original || a.tipo || '—'}</td>
+              <td>${a.tamanho_bytes ? (a.tamanho_bytes / 1024).toFixed(1) + ' KB' : '—'}</td>
+              <td>
+                ${a.download_url
+                  ? `<a href="${apiBase()}${a.download_url}" target="_blank" class="btn-sm success" style="text-decoration:none">⬇ Baixar</a>`
+                  : '<span style="color:#94a3b8;font-size:12px">indisponível</span>'}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch(e) {
+    el.innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+async function abrirUploadRepositorio() {
+  abrirModal('Enviar arquivo ao repositório', `
+    <div class="form-group"><label>Descrição / Motivo</label>
+      <input class="modal-input" id="ru_desc" placeholder="Ex: Ata da Sessão Magna de Abril/2026" /></div>
+    <div class="form-group"><label>Categoria</label>
+      <select class="modal-input" id="ru_ctx">
+        <option value="geral">Geral</option>
+        <option value="ata">Ata</option>
+        <option value="contrato">Contrato</option>
+        <option value="comprovante">Comprovante</option>
+        <option value="outro">Outro</option>
+      </select></div>
+    <div class="form-group"><label>Arquivo(s)</label>
+      <input type="file" id="ru_arquivos" multiple class="modal-input" /></div>
+    <div class="sb-msg" id="ruMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Enviar', cls: 'primary', action: 'submitUploadRepositorio()' },
+  ]);
+}
+
+async function submitUploadRepositorio() {
+  const loja = state.usuario?.loja_id || 1;
+  const desc = document.getElementById('ru_desc').value.trim();
+  const ctx  = document.getElementById('ru_ctx').value;
+  const arqs = document.getElementById('ru_arquivos').files;
+  const msg  = document.getElementById('ruMsg');
+
+  if (!desc) { msg.textContent = 'Informe uma descrição.'; return; }
+  if (!arqs.length) { msg.textContent = 'Selecione ao menos um arquivo.'; return; }
+
+  const fd = new FormData();
+  fd.append('loja_id', loja);
+  fd.append('descricao', desc);
+  fd.append('contexto', ctx);
+  for (const f of arqs) fd.append('arquivos', f);
+
+  try {
+    msg.textContent = 'Enviando…';
+    const opts = { method: 'POST', body: fd };
+    if (state.token) opts.headers = { Authorization: 'Basic ' + state.token };
+    const res = await fetch(apiBase() + '/repositorio/upload', opts);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Erro ao enviar');
+    fecharModal();
+    carregarRepositorio();
+  } catch(e) {
+    msg.textContent = e.message;
+  }
 }
 
 
