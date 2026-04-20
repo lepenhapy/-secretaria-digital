@@ -908,7 +908,7 @@ def criar_regra_rateio(
     try:
         rid = svc.criar_regra(
             payload.loja_id, payload.nome, payload.descricao,
-            [i.model_dump() for i in payload.itens], actor.id,
+            [i.model_dump() for i in payload.itens], actor.user_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -980,7 +980,7 @@ async def criar_compra(
     actor: Actor = Depends(get_current_actor),
     svc: ComprasService = Depends(get_compras_service),
 ):
-    compra_id = svc.criar_compra(loja_id, actor.id, evento, valor, regra_rateio_id)
+    compra_id = svc.criar_compra(loja_id, actor.user_id, evento, valor, regra_rateio_id)
     for arq in arquivos:
         content = await arq.read()
         mime = arq.content_type or ""
@@ -1022,7 +1022,7 @@ def atualizar_status_compra(
 ):
     if payload.status not in ("aprovado", "rejeitado", "pendente"):
         raise HTTPException(status_code=400, detail="Status inválido.")
-    svc.atualizar_status(compra_id, payload.status, actor.id, payload.observacao)
+    svc.atualizar_status(compra_id, payload.status, actor.user_id, payload.observacao)
     return {"status": "updated"}
 
 @app.patch("/compras/{compra_id}/visibilidade")
