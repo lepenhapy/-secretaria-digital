@@ -1739,6 +1739,9 @@ async function renderComprasView() {
             <button class="btn-sm danger"  onclick="rejeitarCompra(${c.id})">Rejeitar</button>
           ` : ''}
           <button class="btn-sm neutral" onclick="toggleVisibilidade(${c.id}, ${!c.visivel})">${c.visivel ? 'Ocultar' : 'Mostrar'}</button>
+          ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo)
+            ? `<button class="btn-sm danger" onclick="excluirCompra(${c.id})">🗑 Excluir</button>`
+            : ''}
         </div>
       </div>
     `).join('');
@@ -1829,6 +1832,14 @@ async function excluirArquivoCompra(compraId, arquivoId) {
   if (!confirm('Excluir este arquivo permanentemente?')) return;
   try {
     await api('DELETE', `/compras/${compraId}/arquivo/${arquivoId}`);
+    renderComprasView();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function excluirCompra(id) {
+  if (!confirm('Excluir esta compra permanentemente?\n\nTodos os arquivos anexados também serão removidos. Esta ação não pode ser desfeita.')) return;
+  try {
+    await api('DELETE', `/compras/${id}`);
     renderComprasView();
   } catch(e) { alert('Erro: ' + e.message); }
 }

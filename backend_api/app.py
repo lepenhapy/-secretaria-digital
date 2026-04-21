@@ -1261,6 +1261,33 @@ def excluir_arquivo_compra(
         if p.exists():
             p.unlink(missing_ok=True)
 
+
+@app.delete("/compras/{compra_id}", status_code=204)
+def excluir_compra(
+    compra_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    if actor.cargo not in ("admin_principal", "veneravel_mestre"):
+        raise HTTPException(status_code=403, detail="Sem permissão para excluir compras.")
+    with db.transaction() as tx:
+        compra = tx.fetch_one("SELECT id, loja_id FROM compras WHERE id=%s", (compra_id,))
+        if not compra:
+            raise HTTPException(status_code=404, detail="Compra não encontrada.")
+        # Busca caminhos de arquivo para limpeza no filesystem
+        arquivos = tx.fetch_all(
+            "SELECT caminho FROM compras_arquivos WHERE compra_id=%s", (compra_id,)
+        )
+        tx.execute("DELETE FROM compras_arquivos WHERE compra_id=%s", (compra_id,))
+        tx.execute("DELETE FROM compras WHERE id=%s", (compra_id,))
+    import pathlib
+    for arq in arquivos:
+        if arq.get("caminho"):
+            try:
+                pathlib.Path(arq["caminho"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+
 # ── Notificações destinatários ────────────────────────────────────────────
 
 @app.get("/notificacoes/destinatarios")
