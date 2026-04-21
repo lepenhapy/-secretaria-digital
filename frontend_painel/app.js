@@ -9,7 +9,7 @@ const CARGOS = [
     id: 'admin_principal',
     label: 'Administrador Principal',
     nivel: 100,
-    icone: '👑',
+    icone: '🕶️',
     cor: '#7c3aed',
     descricao: 'Acesso irrestrito ao sistema. Gerencia todas as lojas, usuários, operações financeiras e configurações.',
     responsabilidades: [
@@ -2064,6 +2064,13 @@ function mudarRelat(tipo, btn) {
   gerarRelatorio();
 }
 
+let _chartInstances = [];
+
+function _destruirCharts() {
+  _chartInstances.forEach(c => { try { c.destroy(); } catch(_) {} });
+  _chartInstances = [];
+}
+
 async function gerarRelatorio() {
   const loja  = state.usuario?.loja_id || 1;
   const ini   = document.getElementById('relat_inicio')?.value || '';
@@ -2071,23 +2078,105 @@ async function gerarRelatorio() {
   const ocultos = document.getElementById('relat_ocultos')?.checked ? 'true' : 'false';
   const el    = document.getElementById('relatConteudo');
   if (!el) return;
+  _destruirCharts();
   el.innerHTML = '<div class="loading">Gerando relatório…</div>';
 
   try {
     let html = '';
+    let dados = null;
     if (_relatAtivo === 'tesouraria') {
-      const r = await api('GET', `/relatorios/tesouraria?loja_id=${loja}&incluir_ocultos=${ocultos}&data_inicio=${ini}&data_fim=${fim}`);
-      html = renderRelatTesouraria(r);
+      dados = await api('GET', `/relatorios/tesouraria?loja_id=${loja}&incluir_ocultos=${ocultos}&data_inicio=${ini}&data_fim=${fim}`);
+      html = renderRelatTesouraria(dados);
     } else if (_relatAtivo === 'mensalidades') {
-      const r = await api('GET', `/relatorios/mensalidades?loja_id=${loja}&data_inicio=${ini}&data_fim=${fim}`);
-      html = renderRelatMensalidades(r);
+      dados = await api('GET', `/relatorios/mensalidades?loja_id=${loja}&data_inicio=${ini}&data_fim=${fim}`);
+      html = renderRelatMensalidades(dados);
     } else {
-      const r = await api('GET', `/relatorios/agenda?loja_id=${loja}&data_inicio=${ini}&data_fim=${fim}`);
-      html = renderRelatAgenda(r);
+      dados = await api('GET', `/relatorios/agenda?loja_id=${loja}&data_inicio=${ini}&data_fim=${fim}`);
+      html = renderRelatAgenda(dados);
     }
     el.innerHTML = html;
+    _renderCharts(_relatAtivo, dados);
   } catch(e) {
     el.innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+function _renderCharts(tipo, dados) {
+  if (typeof Chart === 'undefined' || !dados) return;
+  Chart.defaults.font.family = "'Inter', 'Segoe UI', sans-serif";
+  Chart.defaults.font.size = 12;
+
+  if (tipo === 'tesouraria') {
+    // Gráfico 1: Aprovado / Pendente / Rejeitado (doughnut)
+    const c1 = document.getElementById('chartStatus');
+    if (c1) {
+      const totAprov = parseFloat(dados.resumo_status?.find(s => s.status === 'aprovado')?.total || 0);
+      const totPend  = parseFloat(dados.resumo_status?.find(s => s.status === 'pendente')?.total || 0);
+      const totRej   = parseFloat(dados.resumo_status?.find(s => s.status === 'rejeitado')?.total || 0);
+      _chartInstances.push(new Chart(c1, {
+        type: 'doughnut',
+        data: {
+          labels: ['Aprovado', 'Pendente', 'Rejeitado'],
+          datasets: [{ data: [totAprov, totPend, totRej],
+            backgroundColor: ['#16a34a','#ca8a04','#dc2626'],
+            borderWidth: 2, borderColor: '#fff' }],
+        },
+        options: { plugins: { legend: { position: 'bottom' } }, cutout: '60%' },
+      }));
+    }
+    // Gráfico 2: Por centro de custo (bar)
+    const c2 = document.getElementById('chartCentros');
+    if (c2 && dados.resumo_centros_custo?.length) {
+      _chartInstances.push(new Chart(c2, {
+        type: 'bar',
+        data: {
+          labels: dados.resumo_centros_custo.map(c => c.centro_nome),
+          datasets: [{ label: 'Total aprovado (R$)',
+            data: dados.resumo_centros_custo.map(c => parseFloat(c.total)),
+            backgroundColor: '#2563eb88', borderColor: '#2563eb', borderWidth: 1 }],
+        },
+        options: { plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true } } },
+      }));
+    }
+  } else if (tipo === 'mensalidades') {
+    const c1 = document.getElementById('chartMens');
+    if (c1 && dados.length) {
+      const contagem = {};
+      dados.forEach(r => { contagem[r.categoria] = (contagem[r.categoria] || 0) + 1; });
+      _chartInstances.push(new Chart(c1, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(contagem),
+          datasets: [{ label: 'Irmãos por categoria',
+            data: Object.values(contagem),
+            backgroundColor: ['#2563eb88','#7c3aed88','#059669880','#ca8a0488'],
+            borderWidth: 1 }],
+        },
+        options: { plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } },
+      }));
+    }
+  } else if (tipo === 'agenda') {
+    const c1 = document.getElementById('chartAgenda');
+    if (c1 && dados.length) {
+      const contagem = {};
+      dados.forEach(r => { const t = r.tipo || 'outros'; contagem[t] = (contagem[t] || 0) + 1; });
+      const cores = { sessao:'#2563eb88', agape:'#dc262688', administrativa:'#ca8a0488',
+                      especial:'#7c3aed88', evento:'#05966988' };
+      _chartInstances.push(new Chart(c1, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(contagem),
+          datasets: [{ label: 'Eventos por tipo',
+            data: Object.values(contagem),
+            backgroundColor: Object.keys(contagem).map(t => cores[t] || '#94a3b888'),
+            borderWidth: 1 }],
+        },
+        options: { plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } },
+      }));
+    }
   }
 }
 
@@ -2120,6 +2209,16 @@ function renderRelatTesouraria(r) {
         </tr>`).join('')}
       </tbody>
     </table>` : ''}
+    <div class="relat-charts-row">
+      <div class="relat-chart-wrap">
+        <h4>Distribuição por status</h4>
+        <canvas id="chartStatus" style="max-height:260px"></canvas>
+      </div>
+      <div class="relat-chart-wrap">
+        <h4>Por centro de custo</h4>
+        <canvas id="chartCentros" style="max-height:260px"></canvas>
+      </div>
+    </div>
     <h3 style="margin:20px 0 8px">Lançamentos</h3>
     <table class="relat-table">
       <thead><tr><th>Data</th><th>Irmão</th><th>Evento</th><th>Valor</th><th>Status</th><th>Aprovado por</th></tr></thead>
@@ -2143,6 +2242,12 @@ function renderRelatTesouraria(r) {
 function renderRelatMensalidades(rows) {
   if (!rows.length) return '<p class="empty-msg">Nenhuma mensalidade no período.</p>';
   return `
+    <div class="relat-charts-row">
+      <div class="relat-chart-wrap">
+        <h4>Irmãos por categoria</h4>
+        <canvas id="chartMens" style="max-height:260px"></canvas>
+      </div>
+    </div>
     <table class="relat-table">
       <thead><tr><th>Irmão</th><th>CIM</th><th>Categoria</th><th>Valor/mês</th><th>Vigência</th></tr></thead>
       <tbody>${rows.map(r => `
@@ -2160,6 +2265,12 @@ function renderRelatMensalidades(rows) {
 function renderRelatAgenda(rows) {
   if (!rows.length) return '<p class="empty-msg">Nenhum evento no período.</p>';
   return `
+    <div class="relat-charts-row">
+      <div class="relat-chart-wrap">
+        <h4>Eventos por tipo</h4>
+        <canvas id="chartAgenda" style="max-height:260px"></canvas>
+      </div>
+    </div>
     <table class="relat-table">
       <thead><tr><th>Data</th><th>Horário</th><th>Título</th><th>Tipo</th><th>Status</th></tr></thead>
       <tbody>${rows.map(r => `
@@ -2250,8 +2361,8 @@ async function carregarRepositorio() {
                 ${a.download_url
                   ? `<button class="btn-sm success" onclick="downloadComAuth('${a.download_url}','${(a.nome_original||'arquivo').replace(/'/g,"\\'")}')">⬇ Baixar</button>`
                   : '<span style="color:#94a3b8;font-size:12px">indisponível</span>'}
-                ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo) && a.contexto !== 'compra'
-                  ? `<button class="btn-sm danger" onclick="excluirArquivoRepo(${a.id})">🗑</button>`
+                ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo)
+                  ? `<button class="btn-sm danger" onclick="excluirArquivoUniversal('${a.contexto}',${a.contexto_id||0},${a.id})">🗑</button>`
                   : ''}
               </td>
             </tr>`).join('')}
@@ -2778,13 +2889,21 @@ async function enviarArquivoRapido() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  EXCLUIR ARQUIVO DO REPOSITÓRIO
+//  EXCLUIR ARQUIVO (repositório e compras)
 // ═══════════════════════════════════════════════════════════
 
 async function excluirArquivoRepo(id) {
+  return excluirArquivoUniversal('geral', 0, id);
+}
+
+async function excluirArquivoUniversal(contexto, contextoId, arquivoId) {
   if (!confirm('Excluir este arquivo permanentemente?')) return;
   try {
-    await api('DELETE', `/repositorio/${id}`);
+    if (contexto === 'compra') {
+      await api('DELETE', `/compras/${contextoId}/arquivo/${arquivoId}`);
+    } else {
+      await api('DELETE', `/repositorio/${arquivoId}`);
+    }
     carregarRepositorio();
   } catch(e) { alert('Erro: ' + e.message); }
 }

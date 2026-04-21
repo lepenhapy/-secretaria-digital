@@ -712,6 +712,9 @@ body {
 .relat-table tr:last-child td { border-bottom:none; }
 .row-oculto td { opacity:.5; }
 .row-rateio td { background:#f8fafc; color:var(--muted); font-size:12px; }
+.relat-charts-row { display:flex; gap:16px; flex-wrap:wrap; margin:20px 0; }
+.relat-chart-wrap { background:#fff; border-radius:12px; padding:18px 20px; box-shadow:var(--shadow); flex:1; min-width:220px; }
+.relat-chart-wrap h4 { font-size:13px; font-weight:700; color:var(--muted); margin:0 0 12px; }
 .print-only-btn { display:inline-block; }
 
 /* ═══════════════════════════════════════════════════════════
