@@ -71,11 +71,11 @@ const CARGOS = [
   },
   {
     id: 'financeiro',
-    label: 'Financeiro',
+    label: 'Tesoureiro',
     nivel: 60,
     icone: '💼',
     cor: '#059669',
-    descricao: 'Responsável pelo controle financeiro da loja: reembolsos, cobranças e pagamentos.',
+    descricao: 'Responsável pela tesouraria da loja: controla reembolsos, cobranças e pagamentos.',
     responsabilidades: [
       { icone: '💰', titulo: 'Gestão de reembolsos',  desc: 'Cria, aprova e registra pagamento de reembolsos.' },
       { icone: '🧾', titulo: 'Emissão de cobranças',  desc: 'Gera cobranças vinculadas a contratos da loja.' },
@@ -301,13 +301,10 @@ const FUNCIONALIDADES = {
   },
   upload_arquivo: {
     icone: '📁', titulo: 'Enviar Arquivo',
-    desc: 'Use o módulo Repositório na barra lateral para enviar arquivos com upload completo.',
-    quem: 'admin, veneravel, 1º/2º vigilante, secretário, financeiro',
+    desc: 'Envia documentos, fotos ou comprovantes para o repositório da loja. O sistema identifica automaticamente comprovantes de compra.',
+    quem: 'admin, veneravel, 1º/2º vigilante, secretário, tesoureiro',
     cor: '#475569',
-    campos: [
-      { id: 'f_info', label: 'Dica', tipo: 'text', valor: 'Use o módulo Repositório →' },
-    ],
-    acao: async () => { abrirModulo('repositorio'); return { info: 'Redirecionado para o Repositório.' }; },
+    customOnClick: 'abrirUploadArquivoRapido()',
   },
   gerar_cobranca: {
     icone: '🧾', titulo: 'Gerar Cobrança',
@@ -679,6 +676,14 @@ function renderHome() {
 //  MÓDULO — CADASTRO DE IRMÃOS
 // ═══════════════════════════════════════════════════════════
 
+// Cargos da loja para o cadastro de irmãos
+const CARGOS_LOJA_OPCOES = [
+  '', 'Venerável Mestre', '1º Vigilante', '2º Vigilante', 'Secretário',
+  'Tesoureiro', 'Orador', 'Chanceler', 'Hospitaleiro', 'Guarda do Templo',
+  'Mestre de Cerimônias', 'Mestre de Banquete', 'Almoxarife', 'Arquiteto',
+  'Obreiro', 'Irmão do Quadro',
+];
+
 // Categorias dinâmicas — carregadas da API (fallback para fixas)
 let _categoriasMensalidade = [];
 
@@ -742,13 +747,14 @@ async function renderIrmaoView() {
           </div>
         </div>
         <div class="irmao-card-body">
+          ${ir.cargo_loja ? `<div>⚒️ <strong>Cargo:</strong> ${ir.cargo_loja}</div>` : ''}
           <div>📱 <strong>WhatsApp:</strong> ${ir.tel || '—'}</div>
           <div>🎂 <strong>Nascimento:</strong> ${formatData(ir.nascimento)}</div>
           <div>💍 <strong>Esposa:</strong> ${ir.esposa || '—'}</div>
           <div>👶 <strong>Filhos:</strong> ${filhosHtml}</div>
         </div>
         <div class="irmao-card-tags">
-          ${tagMensalidade(ir.mensalidade)}
+          ${tagMensalidade(ir.mensalidade_categoria || ir.mensalidade)}
           ${anivProximo(ir.nascimento) ? '<span class="tag tag-aniv">🎂 Aniversário próximo</span>' : ''}
           <span class="tag" style="background:#f0f9ff;color:#0369a1;border-color:#bae6fd;margin-top:4px">Ver perfil →</span>
         </div>
@@ -801,12 +807,17 @@ async function renderIrmaoView() {
           <input class="form-input" id="fi_esposa" type="text" placeholder="Se houver" />
         </div>
         <div class="form-group">
+          <label class="form-label">Cargo / Função na Loja</label>
+          <select class="form-select" id="fi_cargo_loja">
+            ${CARGOS_LOJA_OPCOES.map(c => `<option value="${c}">${c || '— sem cargo —'}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
           <label class="form-label">Regra de Mensalidade</label>
           <select class="form-select" id="fi_mensalidade">
-            <option value="regular">Regular</option>
-            <option value="idoso">Idoso</option>
-            <option value="potencia">Com Potência</option>
-            <option value="especial">Especial</option>
+            ${_categoriasMensalidade.length
+              ? _categoriasMensalidade.map(c => `<option value="${c.nome}">${c.nome}</option>`).join('')
+              : '<option value="regular">Regular</option><option value="idoso">Idoso</option><option value="potencia">Com Potência</option><option value="especial">Especial</option>'}
           </select>
         </div>
       </div>
@@ -865,6 +876,7 @@ async function salvarIrmao() {
     data_nascimento:      document.getElementById('fi_nasc').value || null,
     nome_esposa:          document.getElementById('fi_esposa').value.trim() || null,
     mensalidade_categoria: document.getElementById('fi_mensalidade').value || null,
+    cargo_loja:           document.getElementById('fi_cargo_loja').value || null,
     filhos,
   };
 
@@ -905,6 +917,10 @@ async function editarIrmao(id) {
         <input class="modal-input" type="date" id="ei_nasc" value="${ir.data_nascimento||''}" /></div>
       <div class="form-group" style="grid-column:1/-1"><label>Nome da Esposa</label>
         <input class="modal-input" id="ei_esposa" value="${ir.nome_esposa||''}" /></div>
+      <div class="form-group"><label>Cargo / Função na Loja</label>
+        <select class="modal-input" id="ei_cargo_loja">
+          ${CARGOS_LOJA_OPCOES.map(c => `<option value="${c}" ${(ir.cargo_loja||'')===c?'selected':''}>${c||'— sem cargo —'}</option>`).join('')}
+        </select></div>
       <div class="form-group" style="grid-column:1/-1"><label>Filhos (nome / data — um por linha)</label>
         <textarea class="modal-input" id="ei_filhos" rows="3">${filhosStr}</textarea></div>
     </div>
@@ -931,6 +947,7 @@ async function salvarEdicaoIrmao(id, lojaId) {
     telefone:          document.getElementById('ei_tel').value.trim()||null,
     data_nascimento:   document.getElementById('ei_nasc').value||null,
     nome_esposa:       document.getElementById('ei_esposa').value.trim()||null,
+    cargo_loja:        document.getElementById('ei_cargo_loja').value||null,
     filhos,
   };
   try {
@@ -2487,7 +2504,7 @@ const CARGOS_LABELS = {
   veneravel_mestre:    'Venerável Mestre',
   primeiro_vigilante:  '1º Vigilante',
   segundo_vigilante:   '2º Vigilante',
-  financeiro:          'Financeiro',
+  financeiro:          'Tesoureiro',
   secretario:          'Secretário',
   orador:              'Orador',
   chanceler:           'Chanceler',
@@ -2653,6 +2670,81 @@ async function excluirUsuario(id, nome) {
 // Fecha sidebar ao navegar (mobile)
 function _navClick() {
   if (window.innerWidth <= 768) toggleSidebar(true);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  UPLOAD RÁPIDO DE ARQUIVO (botão em qualquer cargo)
+// ═══════════════════════════════════════════════════════════
+
+function abrirUploadArquivoRapido() {
+  abrirModal('📁 Enviar Arquivo', `
+    <div class="form-group">
+      <label>Sobre o que são estes arquivos?</label>
+      <select class="modal-input" id="ur_ctx">
+        <option value="geral">Geral</option>
+        <option value="agape">Ágape</option>
+        <option value="comprovante">Comprovante de Compra / Nota Fiscal</option>
+        <option value="ata">Ata de Sessão</option>
+        <option value="contrato">Contrato</option>
+        <option value="outro">Outro</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Descrição</label>
+      <input class="modal-input" id="ur_desc" placeholder="Ex: Nota fiscal do ágape de abril/2026" />
+    </div>
+    <div class="form-group">
+      <label>Arquivo(s)</label>
+      <input type="file" id="ur_arqs" multiple class="modal-input"
+             accept=".pdf,.txt,.doc,.docx,.jpg,.jpeg,.png,.csv,.xls,.xlsx" />
+    </div>
+    <div class="sb-msg" id="urMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: '⬆ Enviar', cls: 'primary', action: 'enviarArquivoRapido()' },
+  ]);
+}
+
+async function enviarArquivoRapido() {
+  const loja = state.usuario?.loja_id || 1;
+  const ctx  = document.getElementById('ur_ctx').value;
+  const desc = document.getElementById('ur_desc').value.trim();
+  const arqs = document.getElementById('ur_arqs').files;
+  const msg  = document.getElementById('urMsg');
+
+  if (!desc) { msg.textContent = 'Informe uma descrição.'; return; }
+  if (!arqs.length) { msg.textContent = 'Selecione ao menos um arquivo.'; return; }
+
+  msg.style.color = '#64748b'; msg.textContent = 'Enviando…';
+  const fd = new FormData();
+  fd.append('loja_id', loja);
+  fd.append('descricao', desc);
+  fd.append('contexto', ctx);
+  for (const f of arqs) fd.append('arquivos', f);
+
+  try {
+    const opts = { method: 'POST', body: fd };
+    if (state.token) opts.headers = { Authorization: 'Basic ' + state.token };
+    const res = await fetch(apiBase() + '/repositorio/upload', opts);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Erro ao enviar');
+
+    fecharModal();
+
+    // Verificar se algum arquivo sugere reembolso
+    const sugerem = (data.salvos || []).filter(s => s.sugere_reembolso);
+    if (sugerem.length) {
+      const nomes = sugerem.map(s => s.nome).join(', ');
+      if (confirm(`📋 O sistema identificou que "${nomes}" pode ser um comprovante de compra.\n\nDeseja criar um pedido de reembolso para este valor?`)) {
+        abrirModal('✔️ Aprovar / Rejeitar Reembolso', '', []);
+        abrirAprovarReembolsoLista();
+      }
+    } else {
+      alert(`✅ ${data.salvos?.length || 0} arquivo(s) enviado(s) com sucesso!`);
+    }
+  } catch(e) {
+    msg.style.color = '#dc2626'; msg.textContent = '⚠ ' + e.message;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

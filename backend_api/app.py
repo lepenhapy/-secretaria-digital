@@ -687,6 +687,7 @@ class CreateIrmaoInput(BaseModel):
     filhos: list[FilhoInput] = []
     mensalidade_categoria: Optional[str] = None
     mensalidade_valor: Optional[Decimal] = None
+    cargo_loja: Optional[str] = None
 
 
 class SetMensalidadeInput(BaseModel):
@@ -702,6 +703,7 @@ def criar_irmao(
     payload: CreateIrmaoInput,
     actor: Actor = Depends(get_current_actor),
     reg: RegistrationService = Depends(get_registration_service),
+    db=Depends(get_database),
 ):
     try:
         irmao_id = reg.criar_irmao(
@@ -719,6 +721,9 @@ def criar_irmao(
         )
     except DomainError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.cargo_loja:
+        with db.transaction() as tx:
+            tx.execute("UPDATE irmaos SET cargo_loja=%s WHERE id=%s", (payload.cargo_loja, irmao_id))
     return {"status": "created", "irmao_id": irmao_id}
 
 
@@ -1453,11 +1458,12 @@ def atualizar_irmao(
     with db.transaction() as tx:
         tx.execute(
             """UPDATE irmaos SET nome=%s, telefone=%s, cim=%s, potencia=%s,
-               data_nascimento=%s, nome_esposa=%s, data_nascimento_esposa=%s
+               data_nascimento=%s, nome_esposa=%s, data_nascimento_esposa=%s,
+               cargo_loja=%s
                WHERE id=%s""",
             (payload.nome, payload.telefone, payload.cim, payload.potencia,
              payload.data_nascimento, payload.nome_esposa, payload.data_nascimento_esposa,
-             irmao_id),
+             payload.cargo_loja or None, irmao_id),
         )
         if payload.filhos:
             tx.execute("DELETE FROM irmaos_filhos WHERE irmao_id=%s", (irmao_id,))
@@ -1526,7 +1532,7 @@ def listar_repositorio(
                        r.descricao, u.nome AS enviado_por,
                        COALESCE(r.mimetype, 'arquivo') AS tipo,
                        r.nome_original, r.tamanho_bytes, r.criado_em,
-                       r.caminho IS NOT NULL AS disponivel
+                       (r.caminho IS NOT NULL OR r.conteudo IS NOT NULL) AS disponivel
                 FROM repositorio_arquivos r
                 LEFT JOIN usuarios u ON u.id = r.usuario_id
                 WHERE {wr}
@@ -1580,6 +1586,35 @@ def download_repositorio(
     )
 
 
+def _extrair_texto(content: bytes, filename: str, mimetype: str) -> str:
+    """Extrai texto do arquivo para análise semântica."""
+    nome_lower = (filename or '').lower()
+    mime_lower = (mimetype or '').lower()
+    try:
+        if 'text' in mime_lower or nome_lower.endswith('.txt') or nome_lower.endswith('.csv'):
+            return content.decode('utf-8', errors='ignore')[:3000]
+        if 'pdf' in mime_lower or nome_lower.endswith('.pdf'):
+            import io as _io
+            import pypdf
+            reader = pypdf.PdfReader(_io.BytesIO(content))
+            texto = ' '.join(p.extract_text() or '' for p in reader.pages[:5])
+            return texto[:3000]
+    except Exception:
+        pass
+    return ''
+
+_PALAVRAS_COMPROVANTE = [
+    'total', 'valor', 'subtotal', 'nota fiscal', 'nf-e', 'cnpj',
+    'pagamento', 'comprovante', 'recibo', 'cupom', 'venda', 'r$',
+    'produto', 'item', 'quantidade', 'preço',
+]
+
+def _sugere_reembolso(texto: str) -> bool:
+    t = texto.lower()
+    hits = sum(1 for p in _PALAVRAS_COMPROVANTE if p in t)
+    return hits >= 3
+
+
 @app.post("/repositorio/upload", status_code=201)
 async def upload_repositorio(
     loja_id: int = Form(...),
@@ -1601,7 +1636,10 @@ async def upload_repositorio(
         fdir = Path(base) / str(loja_id) / "repositorio"
         fdir.mkdir(parents=True, exist_ok=True)
         fpath = str(fdir / fname)
-        Path(fpath).write_bytes(content)
+        try:
+            Path(fpath).write_bytes(content)
+        except Exception:
+            fpath = None
         with db.transaction() as tx:
             row = tx.fetch_one(
                 """INSERT INTO repositorio_arquivos
@@ -1611,7 +1649,14 @@ async def upload_repositorio(
                 (loja_id, actor.user_id, contexto, descricao, fpath,
                  arq.filename, arq.content_type, len(content), sha, content),
             )
-        salvos.append({"id": row["id"], "nome": arq.filename})
+        texto = _extrair_texto(content, arq.filename or '', arq.content_type or '')
+        sugerir = _sugere_reembolso(texto)
+        extrato = texto[:400] if texto else ''
+        salvos.append({
+            "id": row["id"], "nome": arq.filename,
+            "sugere_reembolso": sugerir,
+            "texto_extraido": extrato,
+        })
     return {"salvos": salvos}
 
 
