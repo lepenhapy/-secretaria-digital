@@ -1555,14 +1555,19 @@ def download_repositorio(
     from fastapi.responses import StreamingResponse
     with db.transaction() as tx:
         row = tx.fetch_one(
-            "SELECT caminho, nome_original, mimetype FROM repositorio_arquivos WHERE id=%s",
+            "SELECT caminho, nome_original, mimetype, conteudo FROM repositorio_arquivos WHERE id=%s",
             (arquivo_id,),
         )
-    if not row or not row["caminho"] or not os.path.exists(row["caminho"]):
+    if not row:
         raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
-    data = open(row["caminho"], "rb").read()
     mime = row["mimetype"] or "application/octet-stream"
     nome = row["nome_original"] or "arquivo"
+    if row["caminho"] and os.path.exists(row["caminho"]):
+        data = open(row["caminho"], "rb").read()
+    elif row["conteudo"]:
+        data = bytes(row["conteudo"])
+    else:
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
     return StreamingResponse(
         io.BytesIO(data), media_type=mime,
         headers={"Content-Disposition": f'attachment; filename="{nome}"'},
@@ -1595,10 +1600,10 @@ async def upload_repositorio(
             row = tx.fetch_one(
                 """INSERT INTO repositorio_arquivos
                    (loja_id, usuario_id, contexto, descricao, caminho, nome_original,
-                    mimetype, tamanho_bytes, sha256)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                    mimetype, tamanho_bytes, sha256, conteudo)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                 (loja_id, actor.user_id, contexto, descricao, fpath,
-                 arq.filename, arq.content_type, len(content), sha),
+                 arq.filename, arq.content_type, len(content), sha, content),
             )
         salvos.append({"id": row["id"], "nome": arq.filename})
     return {"salvos": salvos}

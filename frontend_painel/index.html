@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Secretaria Digital</title>
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="styles.css?v=6" />
 </head>
 <body>
 
@@ -19,7 +19,7 @@
   <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
   <aside class="sidebar" id="sidebar">
 
-    <div class="brand">
+    <div class="brand" onclick="if(state&&state.token){mostrarView('homeView');atualizarNavAtivo();}" style="cursor:pointer" title="Ir para home">
       <div class="brand-icon">SD</div>
       <div>
         <div class="brand-title">Secretaria Digital</div>
@@ -239,6 +239,6 @@
   </div>
 </div>
 
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

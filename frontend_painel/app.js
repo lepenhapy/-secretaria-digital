@@ -144,8 +144,23 @@ const CARGOS = [
     funcionalidades: ['upload_arquivo'],
   },
   {
+    id: 'mestre_banquete',
+    label: 'Mestre de Banquete',
+    nivel: 55,
+    icone: '🍽️',
+    cor: '#c2410c',
+    descricao: 'Responsável pelo Ágape e eventos gastronômicos da loja. Coordena orçamentos, compras e logística das refeições nas sessões.',
+    responsabilidades: [
+      { icone: '🍽️', titulo: 'Organização do Ágape',  desc: 'Planeja e coordena ágapes e refeições nas sessões.' },
+      { icone: '🛒', titulo: 'Compras e orçamentos',   desc: 'Solicita orçamentos e registra compras de insumos.' },
+      { icone: '💰', titulo: 'Controle de gastos',     desc: 'Acompanha despesas com alimentação e eventos.' },
+      { icone: '📁', titulo: 'Documentação',           desc: 'Envia notas fiscais, cardápios e registros de eventos.' },
+    ],
+    funcionalidades: ['criar_reembolso','aprovar_reembolso','upload_arquivo'],
+  },
+  {
     id: 'irmao_operacional',
-    label: 'Irmão Operacional',
+    label: 'Irmão do Quadro',
     nivel: 10,
     icone: '🔵',
     cor: '#64748b',
@@ -265,19 +280,10 @@ const FUNCIONALIDADES = {
   },
   aprovar_reembolso: {
     icone: '✔️', titulo: 'Aprovar / Rejeitar Reembolso',
-    desc: 'Analisa uma solicitação de reembolso e decide se será aprovada ou rejeitada.',
-    quem: 'admin, veneravel, 1º vigilante, financeiro',
+    desc: 'Analisa as solicitações de reembolso pendentes e decide aprovação ou rejeição.',
+    quem: 'admin, veneravel, 1º vigilante, financeiro, mestre de banquete',
     cor: '#059669',
-    campos: [
-      { id: 'f_reemb',  label: 'ID do Reembolso',           tipo: 'number', valor: '' },
-      { id: 'f_dec',    label: 'Decisão (aprovado/rejeitado)', tipo: 'text', valor: 'aprovado' },
-      { id: 'f_valor',  label: 'Valor Aprovado',             tipo: 'text',   valor: '' },
-      { id: 'f_obs',    label: 'Observação',                 tipo: 'text',   valor: '' },
-    ],
-    acao: async (c) => api('POST', '/approvals', {
-      entidade_tipo: 'reembolso', entidade_id: +c.f_reemb,
-      decisao: c.f_dec, valor: c.f_valor || null, observacao: c.f_obs || null,
-    }),
+    customOnClick: 'abrirAprovarReembolsoLista()',
   },
   pagar_reembolso: {
     icone: '💳', titulo: 'Marcar como Pago',
@@ -502,12 +508,13 @@ function renderSidebar() {
     <div class="sidebar-nav-module" id="nav-comissoes" onclick="abrirModulo('comissoes')">
       <span style="font-size:15px">👥</span><span>Comissões</span>
     </div>
-    <div class="sidebar-nav-module" id="nav-permissoes" onclick="abrirModulo('permissoes')">
-      <span style="font-size:15px">🔐</span><span>Permissões</span>
-    </div>
     <div class="sidebar-nav-module" id="nav-repositorio" onclick="abrirModulo('repositorio')">
       <span style="font-size:15px">🗄️</span><span>Repositório</span>
     </div>
+    ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo) ? `
+    <div class="sidebar-nav-module" id="nav-permissoes" onclick="abrirModulo('permissoes')">
+      <span style="font-size:15px">🔐</span><span>Permissões</span>
+    </div>` : ''}
     <div class="sidebar-nav-module" id="nav-usuarios" onclick="abrirModulo('usuarios')">
       <span style="font-size:15px">🔑</span><span>Usuários</span>
     </div>
@@ -614,9 +621,10 @@ function renderFuncionalidades(cargo) {
     const f = FUNCIONALIDADES[fid];
     if (!f) return '';
 
+    const onclick = f.customOnClick || `abrirModal('${fid}')`;
     const btns = autenticado
       ? `<div class="func-card-actions">
-           <button class="func-btn primary" onclick="abrirModal('${fid}')">Executar ação</button>
+           <button class="func-btn primary" onclick="${onclick}">Executar ação</button>
          </div>`
       : `<div class="badge-locked">🔒 Faça login para executar</div>`;
 
@@ -1628,6 +1636,10 @@ function toggleSidebar(forceClose) {
 async function renderComprasView() {
   const el = document.getElementById('comprasView');
   const loja = state.usuario?.loja_id || 1;
+  // Lê estado ANTES de re-renderizar para preservar filtros
+  const statusAtual = document.getElementById('filtroStatus')?.value || '';
+  const inclAtual   = document.getElementById('filtroOcultos')?.checked || false;
+
   el.innerHTML = `
     <div class="view-header">
       <h1>Compras & Reembolsos</h1>
@@ -1635,20 +1647,20 @@ async function renderComprasView() {
     </div>
     <div class="filtros-row">
       <select id="filtroStatus" onchange="renderComprasView()">
-        <option value="">Todos os status</option>
-        <option value="pendente">Pendente</option>
-        <option value="aprovado">Aprovado</option>
-        <option value="rejeitado">Rejeitado</option>
+        <option value="" ${!statusAtual?'selected':''}>Todos os status</option>
+        <option value="pendente" ${statusAtual==='pendente'?'selected':''}>Pendente</option>
+        <option value="aprovado" ${statusAtual==='aprovado'?'selected':''}>Aprovado</option>
+        <option value="rejeitado" ${statusAtual==='rejeitado'?'selected':''}>Rejeitado</option>
       </select>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px">
-        <input type="checkbox" id="filtroOcultos" onchange="renderComprasView()"> Incluir ocultos
+        <input type="checkbox" id="filtroOcultos" ${inclAtual?'checked':''} onchange="renderComprasView()"> Incluir ocultos
       </label>
     </div>
     <div id="comprasLista"><div class="loading">Carregando…</div></div>
   `;
 
-  const status = document.getElementById('filtroStatus')?.value || '';
-  const incl   = document.getElementById('filtroOcultos')?.checked ? 'true' : 'false';
+  const status = statusAtual;
+  const incl   = inclAtual ? 'true' : 'false';
   try {
     const params = `loja_id=${loja}&incluir_ocultos=${incl}` + (status ? `&status=${status}` : '');
     const compras = await api('GET', `/compras?${params}`);
@@ -2301,7 +2313,8 @@ async function carregarCargosIrmaos(loja) {
     const CARGOS_SISTEMA = [
       'veneravel_mestre','primeiro_vigilante','segundo_vigilante',
       'financeiro','secretario','orador','chanceler','hospitaleiro',
-      'guarda_templo','mestre_cerimonias'
+      'guarda_templo','mestre_cerimonias','mestre_banquete',
+      'almoxarife','arquiteto','obreiro','irmao_loja'
     ];
     const el = document.getElementById('cargosLista');
     el.innerHTML = irmaos.length ? irmaos.map(i => `
@@ -2504,6 +2517,59 @@ async function togglePermissao(cargo, recurso, acao, checked, loja) {
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  APROVAR REEMBOLSO (lista interativa)
+// ═══════════════════════════════════════════════════════════
+
+async function abrirAprovarReembolsoLista() {
+  const loja = state.usuario?.loja_id || 1;
+  let lista = [];
+  try { lista = await api('GET', `/reimbursements?loja_id=${loja}&status=pendente`); }
+  catch(e) { alert('Erro ao carregar reembolsos: ' + e.message); return; }
+
+  if (!lista.length) {
+    abrirModal('Aprovar / Rejeitar Reembolso',
+      '<p style="color:#64748b;padding:12px 0">Nenhum reembolso pendente no momento.</p>',
+      [{ label: 'Fechar', cls: 'neutral', action: 'fecharModal()' }]);
+    return;
+  }
+
+  abrirModal('Reembolsos Pendentes', `
+    <div style="max-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+      ${lista.map(r => `
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+          <div style="font-weight:600">ID ${r.id} — ${r.categoria}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">
+            Valor solicitado: <strong>R$ ${parseFloat(r.valor_solicitado||0).toFixed(2)}</strong>
+            · Caso: ${r.caso_id}
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+            <button class="func-btn primary" style="font-size:12px;padding:4px 12px"
+              onclick="aprovarReembolsoItem(${r.id},'aprovado')">✓ Aprovar</button>
+            <button class="func-btn danger" style="font-size:12px;padding:4px 12px"
+              onclick="aprovarReembolsoItem(${r.id},'rejeitado')">✗ Rejeitar</button>
+          </div>
+        </div>`).join('')}
+    </div>
+    <div class="sb-msg" id="reembolsoMsg" style="margin-top:8px"></div>
+  `, [{ label: 'Fechar', cls: 'neutral', action: 'fecharModal()' }]);
+}
+
+async function aprovarReembolsoItem(id, decisao) {
+  try {
+    await api('POST', '/approvals', {
+      entidade_tipo: 'reembolso', entidade_id: id,
+      decisao, valor: null, observacao: null,
+    });
+    const msg = document.getElementById('reembolsoMsg');
+    if (msg) { msg.style.color='#16a34a'; msg.textContent = `Reembolso #${id} ${decisao}.`; }
+    setTimeout(abrirAprovarReembolsoLista, 900);
+  } catch(e) {
+    const msg = document.getElementById('reembolsoMsg');
+    if (msg) { msg.style.color='#dc2626'; msg.textContent = '⚠ ' + e.message; }
+  }
+}
 
 // ═══════════════════════════════════════════════════════════
 //  GESTÃO DE USUÁRIOS
