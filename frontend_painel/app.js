@@ -127,7 +127,7 @@ const CARGOS = [
       { icone: '🔧', titulo: 'Manutenção',          desc: 'Coordena serviços de manutenção dos recursos físicos.' },
       { icone: '📁', titulo: 'Documentação técnica',desc: 'Mantém projetos, plantas e laudos arquivados.' },
     ],
-    funcionalidades: ['upload_arquivo'],
+    funcionalidades: ['inventario_loja','upload_arquivo'],
   },
   {
     id: 'almoxarife',
@@ -325,6 +325,13 @@ const FUNCIONALIDADES = {
       valor: c.f_valor, data_vencimento: c.f_venc,
     }),
   },
+  inventario_loja: {
+    icone: '📋', titulo: 'Inventário Digital',
+    desc: 'Gerencie o inventário físico da loja: itens, quantidades, condições e necessidades de compra.',
+    quem: 'arquiteto, almoxarife',
+    cor: '#475569',
+    customOnClick: 'abrirModulo("inventario")',
+  },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -445,7 +452,7 @@ async function login() {
 function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
    'relatoriosView','permissoesView','comissoesView','repositorioView',
-   'agendaView','irmaoDetalheView','usuariosView'].forEach(v => {
+   'agendaView','irmaoDetalheView','usuariosView','inventarioView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -474,6 +481,7 @@ function renderAutenticado(me) {
   document.getElementById('userAvatar').textContent = ini;
   mostrarView('homeView');
   atualizarNavAtivo();
+  atualizarBadgeNotif();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -518,6 +526,13 @@ function renderSidebar() {
     <div class="sidebar-nav-module" id="nav-usuarios" onclick="abrirModulo('usuarios')">
       <span style="font-size:15px">🔑</span><span>Usuários</span>
     </div>
+    <div class="sidebar-nav-module" id="nav-inventario" onclick="abrirModulo('inventario')">
+      <span style="font-size:15px">📋</span><span>Inventário</span>
+    </div>
+    <div class="sidebar-nav-module" id="nav-notificacoes" onclick="abrirInbox()">
+      <span style="font-size:15px">🔔</span><span>Notificações</span>
+      <span id="notifBadge" style="display:none;background:#dc2626;color:#fff;border-radius:9px;padding:1px 6px;font-size:10px;margin-left:auto"></span>
+    </div>
   `;
 
   // Cargos
@@ -554,6 +569,7 @@ function abrirModulo(id) {
     permissoes:     () => { mostrarView('permissoesView');  renderPermissoesView(); },
     repositorio:    () => { mostrarView('repositorioView'); renderRepositorioView(); },
     usuarios:       () => { mostrarView('usuariosView');   renderUsuariosView(); },
+    inventario:     () => { mostrarView('inventarioView'); renderInventarioView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -663,52 +679,43 @@ function renderHome() {
 //  MÓDULO — CADASTRO DE IRMÃOS
 // ═══════════════════════════════════════════════════════════
 
-const CATEGORIAS_MENSALIDADE = [
-  {
-    id: 'regular',
-    titulo: 'Regular',
-    desc: 'Mensalidade padrão da loja',
-    valor: 'A definir',
-    tag: 'tag-regular',
-  },
-  {
-    id: 'idoso',
-    titulo: 'Idoso',
-    desc: 'Valor reduzido para irmãos com 65 anos ou mais',
-    valor: 'A definir',
-    tag: 'tag-idoso',
-  },
-  {
-    id: 'potencia',
-    titulo: 'Com Potência',
-    desc: 'Mensalidade da loja + taxa da Potência (GOB/COMAB) no mesmo boleto',
-    valor: 'A definir',
-    tag: 'tag-potencia',
-  },
-  {
-    id: 'especial',
-    titulo: 'Especial',
-    desc: 'Regra personalizada por irmão — a ser detalhada com o Financeiro',
-    valor: 'A definir',
-    tag: 'tag-especial',
-  },
-];
+// Categorias dinâmicas — carregadas da API (fallback para fixas)
+let _categoriasMensalidade = [];
 
-// Dados de exemplo (serão substituídos por dados da API)
+async function carregarCategoriasMensalidade(loja) {
+  try {
+    const lista = await api('GET', `/categorias-mensalidade?loja_id=${loja}`);
+    _categoriasMensalidade = lista.filter(c => c.ativo);
+  } catch(_) {
+    _categoriasMensalidade = [
+      { id: 'regular',  nome: 'Regular',      descricao: 'Mensalidade padrão da loja' },
+      { id: 'idoso',    nome: 'Idoso',         descricao: 'Valor reduzido para irmãos com 65 anos ou mais' },
+      { id: 'potencia', nome: 'Com Potência',  descricao: 'Mensalidade + taxa da Potência' },
+      { id: 'especial', nome: 'Especial',      descricao: 'Regra personalizada por irmão' },
+    ];
+  }
+}
+
 function tagMensalidade(cat) {
-  const c = CATEGORIAS_MENSALIDADE.find(x => x.id === cat);
-  return c ? `<span class="tag ${c.tag}">${c.titulo}</span>` : '';
+  const c = _categoriasMensalidade.find(x => (x.id || x.nome?.toLowerCase()) === cat);
+  return c ? `<span class="tag tag-regular">${c.nome || c.id}</span>` : (cat ? `<span class="tag tag-regular">${cat}</span>` : '');
 }
 
 async function renderIrmaoView() {
   const view = document.getElementById('irmaoView');
   const loja = state.usuario?.loja_id || 1;
 
-  const categoriaCards = CATEGORIAS_MENSALIDADE.map(c => `
-    <div class="cat-card ${c.id}">
-      <div class="cat-card-titulo">${c.titulo}</div>
-      <div class="cat-card-desc">${c.desc}</div>
-      <div class="cat-card-valor">${c.valor}</div>
+  await carregarCategoriasMensalidade(loja);
+
+  const isAdmin = ['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo);
+  const categoriaCards = _categoriasMensalidade.map(c => `
+    <div class="cat-card">
+      <div class="cat-card-titulo">${c.nome || c.id}</div>
+      <div class="cat-card-desc">${c.descricao || ''}</div>
+      ${isAdmin ? `<div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn-sm neutral" onclick="editarCategoriaMens(${c.id},'${(c.nome||'').replace(/'/g,"\\'")}','${(c.descricao||'').replace(/'/g,"\\'")}')">Editar</button>
+        <button class="btn-sm danger"  onclick="excluirCategoriaMens(${c.id})">Excluir</button>
+      </div>` : ''}
     </div>
   `).join('');
 
@@ -816,7 +823,10 @@ async function renderIrmaoView() {
 
     <!-- Categorias de mensalidade -->
     <div class="mensalidade-info">
-      <h2>💰 Categorias de Mensalidade</h2>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <h2 style="margin:0">💰 Categorias de Mensalidade</h2>
+        ${isAdmin ? `<button class="btn-primary" style="font-size:12px;padding:4px 14px" onclick="novaCategoriaMens()">+ Nova Categoria</button>` : ''}
+      </div>
       <div class="mensalidade-categorias">${categoriaCards}</div>
     </div>
 
@@ -2051,6 +2061,18 @@ function renderRelatTesouraria(r) {
       <thead><tr><th>Centro</th><th>Total aprovado</th></tr></thead>
       <tbody>${r.resumo_centros_custo.map(c => `<tr><td>${c.centro_nome}</td><td>R$ ${parseFloat(c.total).toFixed(2)}</td></tr>`).join('')}</tbody>
     </table>` : ''}
+    ${r.agape_eventos?.length ? `
+    <h3 style="margin:20px 0 8px">🍽️ Ágapes no Período (${r.agape_eventos.length})</h3>
+    <table class="relat-table">
+      <thead><tr><th>Data</th><th>Título</th><th>Horário</th></tr></thead>
+      <tbody>${r.agape_eventos.map(e => `
+        <tr>
+          <td>${new Date(e.data+'T12:00:00').toLocaleDateString('pt-BR')}</td>
+          <td>${e.titulo}</td>
+          <td>${String(e.hora_inicio||'').slice(0,5)} – ${String(e.hora_fim||'').slice(0,5)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>` : ''}
     <h3 style="margin:20px 0 8px">Lançamentos</h3>
     <table class="relat-table">
       <thead><tr><th>Data</th><th>Irmão</th><th>Evento</th><th>Valor</th><th>Status</th><th>Aprovado por</th></tr></thead>
@@ -2177,10 +2199,13 @@ async function carregarRepositorio() {
               <td>${a.descricao || '—'}</td>
               <td>${a.nome_original || a.tipo || '—'}</td>
               <td>${a.tamanho_bytes ? (a.tamanho_bytes / 1024).toFixed(1) + ' KB' : '—'}</td>
-              <td>
+              <td style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                 ${a.download_url
                   ? `<a href="${apiBase()}${a.download_url}" target="_blank" class="btn-sm success" style="text-decoration:none">⬇ Baixar</a>`
                   : '<span style="color:#94a3b8;font-size:12px">indisponível</span>'}
+                ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo)
+                  ? `<button class="btn-sm danger" onclick="excluirArquivoRepo(${a.id})">🗑</button>`
+                  : ''}
               </td>
             </tr>`).join('')}
         </tbody>
@@ -2628,6 +2653,255 @@ async function excluirUsuario(id, nome) {
 // Fecha sidebar ao navegar (mobile)
 function _navClick() {
   if (window.innerWidth <= 768) toggleSidebar(true);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  EXCLUIR ARQUIVO DO REPOSITÓRIO
+// ═══════════════════════════════════════════════════════════
+
+async function excluirArquivoRepo(id) {
+  if (!confirm('Excluir este arquivo permanentemente?')) return;
+  try {
+    await api('DELETE', `/repositorio/${id}`);
+    carregarRepositorio();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CATEGORIAS DE MENSALIDADE
+// ═══════════════════════════════════════════════════════════
+
+async function novaCategoriaMens() {
+  const loja = state.usuario?.loja_id || 1;
+  abrirModal('Nova Categoria de Mensalidade', `
+    <div class="form-group"><label>Nome</label>
+      <input class="modal-input" id="cm_nome" placeholder="Ex: Isento" /></div>
+    <div class="form-group"><label>Descrição</label>
+      <input class="modal-input" id="cm_desc" placeholder="Opcional" /></div>
+    <div class="sb-msg" id="cmMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: `salvarNovaCategoriaMens(${loja})` },
+  ]);
+}
+
+async function salvarNovaCategoriaMens(loja) {
+  const nome = document.getElementById('cm_nome').value.trim();
+  const desc = document.getElementById('cm_desc').value.trim();
+  if (!nome) { document.getElementById('cmMsg').textContent = 'Informe o nome.'; return; }
+  try {
+    await api('POST', '/categorias-mensalidade', { loja_id: loja, nome, descricao: desc || null });
+    fecharModal(); renderIrmaoView();
+  } catch(e) { document.getElementById('cmMsg').textContent = e.message; }
+}
+
+async function editarCategoriaMens(id, nome, desc) {
+  abrirModal('Editar Categoria', `
+    <div class="form-group"><label>Nome</label>
+      <input class="modal-input" id="cm_nome" value="${nome}" /></div>
+    <div class="form-group"><label>Descrição</label>
+      <input class="modal-input" id="cm_desc" value="${desc}" /></div>
+    <div class="sb-msg" id="cmMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: `atualizarCategoriaMens(${id})` },
+  ]);
+}
+
+async function atualizarCategoriaMens(id) {
+  const nome = document.getElementById('cm_nome').value.trim();
+  const desc = document.getElementById('cm_desc').value.trim();
+  if (!nome) { document.getElementById('cmMsg').textContent = 'Informe o nome.'; return; }
+  try {
+    await api('PUT', `/categorias-mensalidade/${id}`, { nome, descricao: desc || null, ativo: true });
+    fecharModal(); renderIrmaoView();
+  } catch(e) { document.getElementById('cmMsg').textContent = e.message; }
+}
+
+async function excluirCategoriaMens(id) {
+  if (!confirm('Excluir esta categoria?')) return;
+  try { await api('DELETE', `/categorias-mensalidade/${id}`); renderIrmaoView(); }
+  catch(e) { alert(e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  INVENTÁRIO DA LOJA
+// ═══════════════════════════════════════════════════════════
+
+const CONDICAO_LABELS = { novo: 'Novo', bom: 'Bom', usado: 'Usado', precisa_reforma: 'Precisa Reforma' };
+
+async function renderInventarioView() {
+  const el   = document.getElementById('inventarioView');
+  const loja = state.usuario?.loja_id || 1;
+  el.innerHTML = `
+    <div class="view-header">
+      <h1>📋 Inventário da Loja</h1>
+      <button class="btn-primary" onclick="abrirNovoItemInventario()">+ Novo Item</button>
+    </div>
+    <div id="invLista"><div class="loading">Carregando…</div></div>
+  `;
+  await carregarInventario();
+}
+
+async function carregarInventario() {
+  const loja = state.usuario?.loja_id || 1;
+  const el   = document.getElementById('invLista');
+  if (!el) return;
+  try {
+    const lista = await api('GET', `/inventario?loja_id=${loja}`);
+    if (!lista.length) { el.innerHTML = '<p class="empty-msg">Nenhum item cadastrado.</p>'; return; }
+
+    const precisa = lista.filter(i => i.precisa_comprar);
+    el.innerHTML = `
+      ${precisa.length ? `<div style="background:#fff7ed;border:1px solid #fb923c;border-radius:8px;padding:12px;margin-bottom:16px;color:#9a3412">
+        ⚠️ <strong>${precisa.length} item(s) precisam ser comprados:</strong> ${precisa.map(i => i.nome).join(', ')}
+      </div>` : ''}
+      <table class="relat-table">
+        <thead>
+          <tr><th>Item</th><th>Qtd</th><th>Condição</th><th>Precisa Comprar</th><th>Ações</th></tr>
+        </thead>
+        <tbody>
+          ${lista.map(i => `
+            <tr>
+              <td>
+                <div style="font-weight:600">${i.nome}</div>
+                ${i.descricao ? `<div style="font-size:12px;color:#64748b">${i.descricao}</div>` : ''}
+              </td>
+              <td>${i.quantidade}</td>
+              <td><span class="badge-status ${i.condicao === 'precisa_reforma' ? 'pendente' : i.condicao === 'novo' ? 'aprovado' : ''}">${CONDICAO_LABELS[i.condicao] || i.condicao}</span></td>
+              <td>${i.precisa_comprar ? '<span style="color:#dc2626;font-weight:600">Sim</span>' : 'Não'}</td>
+              <td style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn-sm neutral" onclick="editarItemInventario(${i.id},'${i.nome.replace(/'/g,"\\'")}','${(i.descricao||'').replace(/'/g,"\\'")}',${i.quantidade},'${i.condicao}',${i.precisa_comprar})">Editar</button>
+                <button class="btn-sm danger"  onclick="excluirItemInventario(${i.id})">🗑</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch(e) {
+    el.innerHTML = `<p class="error-msg">${e.message}</p>`;
+  }
+}
+
+function _formInventario(vals = {}) {
+  return `
+    <div class="form-group"><label>Nome do item</label>
+      <input class="modal-input" id="iv_nome" value="${vals.nome||''}" placeholder="Ex: Projetor Epson" /></div>
+    <div class="form-group"><label>Descrição</label>
+      <input class="modal-input" id="iv_desc" value="${vals.desc||''}" placeholder="Opcional" /></div>
+    <div class="form-group"><label>Quantidade</label>
+      <input class="modal-input" type="number" id="iv_qtd" value="${vals.qtd||1}" min="0" /></div>
+    <div class="form-group"><label>Condição</label>
+      <select class="modal-input" id="iv_cond">
+        ${Object.entries(CONDICAO_LABELS).map(([k,v]) => `<option value="${k}" ${(vals.cond||'bom')===k?'selected':''}>${v}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label style="display:flex;gap:8px;align-items:center">
+      <input type="checkbox" id="iv_comprar" ${vals.comprar?'checked':''}> Precisa comprar</label></div>
+    <div class="sb-msg" id="ivMsg"></div>
+  `;
+}
+
+async function abrirNovoItemInventario() {
+  abrirModal('Novo Item de Inventário', _formInventario(), [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: 'salvarNovoItemInventario()' },
+  ]);
+}
+
+async function salvarNovoItemInventario() {
+  const loja = state.usuario?.loja_id || 1;
+  const nome = document.getElementById('iv_nome').value.trim();
+  if (!nome) { document.getElementById('ivMsg').textContent = 'Informe o nome.'; return; }
+  try {
+    await api('POST', '/inventario', {
+      loja_id: loja, nome,
+      descricao: document.getElementById('iv_desc').value.trim() || null,
+      quantidade: +document.getElementById('iv_qtd').value || 1,
+      condicao: document.getElementById('iv_cond').value,
+      precisa_comprar: document.getElementById('iv_comprar').checked,
+    });
+    fecharModal(); carregarInventario();
+  } catch(e) { document.getElementById('ivMsg').textContent = e.message; }
+}
+
+async function editarItemInventario(id, nome, desc, qtd, cond, comprar) {
+  abrirModal('Editar Item', _formInventario({ nome, desc, qtd, cond, comprar }), [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: `atualizarItemInventario(${id})` },
+  ]);
+}
+
+async function atualizarItemInventario(id) {
+  const nome = document.getElementById('iv_nome').value.trim();
+  if (!nome) { document.getElementById('ivMsg').textContent = 'Informe o nome.'; return; }
+  try {
+    await api('PUT', `/inventario/${id}`, {
+      nome,
+      descricao: document.getElementById('iv_desc').value.trim() || null,
+      quantidade: +document.getElementById('iv_qtd').value || 1,
+      condicao: document.getElementById('iv_cond').value,
+      precisa_comprar: document.getElementById('iv_comprar').checked,
+    });
+    fecharModal(); carregarInventario();
+  } catch(e) { document.getElementById('ivMsg').textContent = e.message; }
+}
+
+async function excluirItemInventario(id) {
+  if (!confirm('Excluir este item do inventário?')) return;
+  try { await api('DELETE', `/inventario/${id}`); carregarInventario(); }
+  catch(e) { alert(e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NOTIFICAÇÕES INBOX
+// ═══════════════════════════════════════════════════════════
+
+async function atualizarBadgeNotif() {
+  if (!state.token) return;
+  const loja = state.usuario?.loja_id || 1;
+  try {
+    const lista = await api('GET', `/notificacoes/inbox?loja_id=${loja}`);
+    const nLidas = lista.filter(n => !n.lido).length;
+    const badge = document.getElementById('notifBadge');
+    if (!badge) return;
+    if (nLidas > 0) {
+      badge.textContent = nLidas;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(_) {}
+}
+
+async function abrirInbox() {
+  const loja = state.usuario?.loja_id || 1;
+  let lista = [];
+  try { lista = await api('GET', `/notificacoes/inbox?loja_id=${loja}`); } catch(_) {}
+
+  const html = lista.length ? lista.map(n => `
+    <div style="border:1px solid ${n.lido ? '#e2e8f0' : '#bfdbfe'};border-radius:8px;padding:12px;background:${n.lido ? '#fff' : '#eff6ff'}">
+      <div style="font-weight:${n.lido ? 400 : 700};font-size:14px">${n.titulo}</div>
+      ${n.mensagem ? `<div style="font-size:12px;color:#64748b;margin-top:4px">${n.mensagem}</div>` : ''}
+      <div style="font-size:11px;color:#94a3b8;margin-top:6px">${new Date(n.criado_em).toLocaleString('pt-BR')}</div>
+    </div>`).join('')
+  : '<p style="color:#94a3b8;padding:12px 0">Nenhuma notificação.</p>';
+
+  abrirModal('🔔 Notificações', `
+    <div style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+      ${html}
+    </div>
+  `, [
+    { label: 'Marcar todas como lidas', cls: 'neutral', action: `marcarTodasNotifLidas(${loja})` },
+    { label: 'Fechar', cls: 'primary', action: 'fecharModal()' },
+  ]);
+}
+
+async function marcarTodasNotifLidas(loja) {
+  try {
+    await api('PUT', `/notificacoes/inbox/todas-lidas?loja_id=${loja}`);
+    atualizarBadgeNotif();
+    fecharModal();
+  } catch(e) { alert(e.message); }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

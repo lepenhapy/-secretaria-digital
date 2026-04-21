@@ -906,8 +906,11 @@ def criar_sessao(
     payload: SessaoInput = ...,
     actor: Actor = Depends(get_current_actor),
     svc: AgendaService = Depends(get_agenda_service),
+    db=Depends(get_database),
 ):
     sid = svc.criar_sessao(loja_id, payload.model_dump())
+    if payload.tipo == 'agape':
+        _notificar_agape(db, loja_id, payload.titulo, None)
     return {"id": sid}
 
 
@@ -938,8 +941,11 @@ def criar_evento_local(
     payload: EventoLocalInput = ...,
     actor: Actor = Depends(get_current_actor),
     svc: AgendaService = Depends(get_agenda_service),
+    db=Depends(get_database),
 ):
     eid = svc.criar_evento(loja_id, payload.model_dump(), actor.user_id)
+    if payload.tipo == 'agape':
+        _notificar_agape(db, loja_id, payload.titulo, payload.data)
     return {"id": eid}
 
 
@@ -1620,3 +1626,227 @@ def whatsapp_status(
         return wpp.status()
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
+
+
+# ═══════════════════════════════════════════════════════════
+#  REPOSITÓRIO — exclusão
+# ═══════════════════════════════════════════════════════════
+
+@app.delete("/repositorio/{arquivo_id}", status_code=204)
+def deletar_repositorio(
+    arquivo_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            "SELECT caminho FROM repositorio_arquivos WHERE id=%s",
+            (arquivo_id,),
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+        tx.execute("DELETE FROM repositorio_arquivos WHERE id=%s", (arquivo_id,))
+    if row.get("caminho"):
+        import pathlib
+        p = pathlib.Path(row["caminho"])
+        if p.exists():
+            p.unlink(missing_ok=True)
+
+
+# ═══════════════════════════════════════════════════════════
+#  CATEGORIAS DE MENSALIDADE
+# ═══════════════════════════════════════════════════════════
+
+class CategoriaInput(BaseModel):
+    loja_id: int
+    nome: str
+    descricao: Optional[str] = None
+
+class CategoriaUpdateInput(BaseModel):
+    nome: str
+    descricao: Optional[str] = None
+    ativo: bool = True
+
+@app.get("/categorias-mensalidade")
+def listar_categorias(
+    loja_id: int = Query(...),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        return tx.fetch_all(
+            "SELECT * FROM categorias_mensalidade WHERE loja_id=%s ORDER BY nome",
+            (loja_id,),
+        )
+
+@app.post("/categorias-mensalidade", status_code=201)
+def criar_categoria(
+    payload: CategoriaInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            """INSERT INTO categorias_mensalidade (loja_id, nome, descricao)
+               VALUES (%s,%s,%s) RETURNING id""",
+            (payload.loja_id, payload.nome, payload.descricao),
+        )
+    return {"id": row["id"]}
+
+@app.put("/categorias-mensalidade/{cat_id}")
+def atualizar_categoria(
+    cat_id: int,
+    payload: CategoriaUpdateInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE categorias_mensalidade SET nome=%s, descricao=%s, ativo=%s WHERE id=%s",
+            (payload.nome, payload.descricao, payload.ativo, cat_id),
+        )
+    return {"status": "updated"}
+
+@app.delete("/categorias-mensalidade/{cat_id}", status_code=204)
+def deletar_categoria(
+    cat_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute("DELETE FROM categorias_mensalidade WHERE id=%s", (cat_id,))
+
+
+# ═══════════════════════════════════════════════════════════
+#  INVENTÁRIO DA LOJA
+# ═══════════════════════════════════════════════════════════
+
+class InventarioInput(BaseModel):
+    loja_id: int
+    nome: str
+    descricao: Optional[str] = None
+    quantidade: int = 1
+    condicao: str = "bom"
+    precisa_comprar: bool = False
+
+class InventarioUpdateInput(BaseModel):
+    nome: str
+    descricao: Optional[str] = None
+    quantidade: int = 1
+    condicao: str = "bom"
+    precisa_comprar: bool = False
+
+@app.get("/inventario")
+def listar_inventario(
+    loja_id: int = Query(...),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        return tx.fetch_all(
+            "SELECT * FROM inventario_loja WHERE loja_id=%s ORDER BY nome",
+            (loja_id,),
+        )
+
+@app.post("/inventario", status_code=201)
+def criar_item_inventario(
+    payload: InventarioInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            """INSERT INTO inventario_loja (loja_id, nome, descricao, quantidade, condicao, precisa_comprar)
+               VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (payload.loja_id, payload.nome, payload.descricao,
+             payload.quantidade, payload.condicao, payload.precisa_comprar),
+        )
+    return {"id": row["id"]}
+
+@app.put("/inventario/{item_id}")
+def atualizar_item_inventario(
+    item_id: int,
+    payload: InventarioUpdateInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            """UPDATE inventario_loja SET nome=%s, descricao=%s, quantidade=%s,
+               condicao=%s, precisa_comprar=%s, atualizado_em=NOW() WHERE id=%s""",
+            (payload.nome, payload.descricao, payload.quantidade,
+             payload.condicao, payload.precisa_comprar, item_id),
+        )
+    return {"status": "updated"}
+
+@app.delete("/inventario/{item_id}", status_code=204)
+def deletar_item_inventario(
+    item_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute("DELETE FROM inventario_loja WHERE id=%s", (item_id,))
+
+
+# ═══════════════════════════════════════════════════════════
+#  NOTIFICAÇÕES INBOX
+# ═══════════════════════════════════════════════════════════
+
+def _notificar_agape(db, loja_id: int, titulo: str, data_evento):
+    """Insere notificação de ágape para usuários financeiro e mestre_banquete."""
+    data_str = f" em {data_evento}" if data_evento else ""
+    with db.transaction() as tx:
+        destinatarios = tx.fetch_all(
+            """SELECT u.id FROM usuarios u
+               JOIN cargos c ON c.id = u.cargo_id
+               WHERE u.loja_id=%s AND c.nome IN ('financeiro','mestre_banquete','tesoureiro') AND u.ativo=TRUE""",
+            (loja_id,),
+        )
+        for dest in destinatarios:
+            tx.execute(
+                """INSERT INTO notificacoes_inbox (loja_id, usuario_id, titulo, mensagem)
+                   VALUES (%s,%s,%s,%s)""",
+                (loja_id, dest["id"], f"Ágape agendado: {titulo}",
+                 f"Um novo ágape foi cadastrado na agenda{data_str}. Providencie orçamento e compras."),
+            )
+
+@app.get("/notificacoes/inbox")
+def listar_inbox(
+    loja_id: int = Query(...),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        return tx.fetch_all(
+            """SELECT * FROM notificacoes_inbox
+               WHERE loja_id=%s AND usuario_id=%s
+               ORDER BY criado_em DESC LIMIT 50""",
+            (loja_id, actor.user_id),
+        )
+
+@app.put("/notificacoes/inbox/{notif_id}/lida", status_code=200)
+def marcar_notif_lida(
+    notif_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE notificacoes_inbox SET lido=TRUE WHERE id=%s AND usuario_id=%s",
+            (notif_id, actor.user_id),
+        )
+    return {"status": "ok"}
+
+@app.put("/notificacoes/inbox/todas-lidas", status_code=200)
+def marcar_todas_lidas(
+    loja_id: int = Query(...),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE notificacoes_inbox SET lido=TRUE WHERE loja_id=%s AND usuario_id=%s",
+            (loja_id, actor.user_id),
+        )
+    return {"status": "ok"}

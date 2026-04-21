@@ -21,3 +21,4 @@
 \i 021_sessoes_recorrentes.sql
 \i 022_irmaos_usuario_id.sql
 \i 023_novos_cargos_e_repositorio_bytea.sql
+\i 024_categorias_inventario_inbox.sql

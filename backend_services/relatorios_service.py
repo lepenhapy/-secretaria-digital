@@ -81,10 +81,26 @@ class RelatoriosService:
                 params_ap,
             )
 
+            # ágape: eventos do tipo agape no mesmo período
+            ev_filters = ["loja_id = %s", "tipo = 'agape'"]
+            ev_params: list = [loja_id]
+            if data_inicio:
+                ev_filters.append("data >= %s")
+                ev_params.append(data_inicio)
+            if data_fim:
+                ev_filters.append("data <= %s")
+                ev_params.append(data_fim)
+            ev_where = " AND ".join(ev_filters)
+            agape_eventos = tx.fetch_all(
+                f"SELECT titulo, data, hora_inicio, hora_fim FROM agenda_eventos WHERE {ev_where} ORDER BY data",
+                ev_params,
+            )
+
         return {
             "compras": compras,
             "resumo_status": resumo_status,
             "resumo_centros_custo": resumo_centros,
+            "agape_eventos": agape_eventos,
         }
 
     def mensalidades(self, loja_id: int, data_inicio=None, data_fim=None) -> list:
