@@ -357,6 +357,22 @@ async function api(method, path, body) {
   return data;
 }
 
+async function downloadComAuth(url, nome) {
+  try {
+    const opts = { headers: {} };
+    if (state.token) opts.headers['Authorization'] = 'Basic ' + state.token;
+    const res = await fetch(apiBase() + url, opts);
+    if (!res.ok) { alert('Arquivo não encontrado ou indisponível.'); return; }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = nome || 'arquivo';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  } catch(e) { alert('Erro ao baixar: ' + e.message); }
+}
+
 // ═══════════════════════════════════════════════════════════
 //  AUTENTICAÇÃO E CADASTRO
 // ═══════════════════════════════════════════════════════════
@@ -1708,7 +1724,13 @@ async function renderComprasView() {
           ${c.regra_nome ? `<span>⚖️ ${c.regra_nome}</span>` : ''}
         </div>
         ${c.arquivos?.length ? `<div class="compra-arquivos">
-          ${c.arquivos.map(a => `<a href="${apiBase()}/compras/${c.id}/arquivo/${a.id}" target="_blank" class="arq-link">📎 ${a.nome_original || a.tipo}</a>`).join('')}
+          ${c.arquivos.map(a => `
+            <span class="arq-link-wrap">
+              <button class="arq-link" onclick="downloadComAuth('/compras/${c.id}/arquivo/${a.id}','${(a.nome_original||a.tipo||'arquivo').replace(/'/g,"\\'")}')">📎 ${a.nome_original || a.tipo}</button>
+              ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo)
+                ? `<button class="btn-sm danger" style="padding:1px 6px;font-size:11px" onclick="excluirArquivoCompra(${c.id},${a.id})">🗑</button>`
+                : ''}
+            </span>`).join('')}
         </div>` : ''}
         ${c.observacao ? `<div class="compra-obs">💬 ${c.observacao}</div>` : ''}
         <div class="compra-acoes">
@@ -1801,6 +1823,14 @@ async function toggleVisibilidade(id, visivel) {
     await api('PATCH', `/compras/${id}/visibilidade`, { visivel });
     renderComprasView();
   } catch(e) { alert(e.message); }
+}
+
+async function excluirArquivoCompra(compraId, arquivoId) {
+  if (!confirm('Excluir este arquivo permanentemente?')) return;
+  try {
+    await api('DELETE', `/compras/${compraId}/arquivo/${arquivoId}`);
+    renderComprasView();
+  } catch(e) { alert('Erro: ' + e.message); }
 }
 
 
@@ -2218,9 +2248,9 @@ async function carregarRepositorio() {
               <td>${a.tamanho_bytes ? (a.tamanho_bytes / 1024).toFixed(1) + ' KB' : '—'}</td>
               <td style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                 ${a.download_url
-                  ? `<a href="${apiBase()}${a.download_url}" target="_blank" class="btn-sm success" style="text-decoration:none">⬇ Baixar</a>`
+                  ? `<button class="btn-sm success" onclick="downloadComAuth('${a.download_url}','${(a.nome_original||'arquivo').replace(/'/g,"\\'")}')">⬇ Baixar</button>`
                   : '<span style="color:#94a3b8;font-size:12px">indisponível</span>'}
-                ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo)
+                ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo) && a.contexto !== 'compra'
                   ? `<button class="btn-sm danger" onclick="excluirArquivoRepo(${a.id})">🗑</button>`
                   : ''}
               </td>

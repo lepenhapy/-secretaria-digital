@@ -49,11 +49,54 @@ from backend_services.core_transaction_services import (
 )
 
 
+def _ensure_schema(db) -> None:
+    """Aplica DDL incremental na inicialização — idempotente."""
+    stmts = [
+        # migration 023
+        "ALTER TABLE repositorio_arquivos ADD COLUMN IF NOT EXISTS conteudo BYTEA",
+        # migration 024 – tabelas novas
+        """CREATE TABLE IF NOT EXISTS categorias_mensalidade (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            nome TEXT NOT NULL, descricao TEXT,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(loja_id, nome))""",
+        """CREATE TABLE IF NOT EXISTS inventario_loja (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            nome TEXT NOT NULL, descricao TEXT,
+            quantidade INT NOT NULL DEFAULT 1,
+            condicao TEXT NOT NULL DEFAULT 'bom',
+            precisa_comprar BOOLEAN NOT NULL DEFAULT FALSE,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS notificacoes_inbox (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            usuario_id INT NOT NULL, titulo TEXT NOT NULL,
+            mensagem TEXT, lido BOOLEAN NOT NULL DEFAULT FALSE,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        # migration 025
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS cargo_loja TEXT",
+        # migration 026 – bytes para arquivos de compras
+        "ALTER TABLE compras_arquivos ADD COLUMN IF NOT EXISTS conteudo BYTEA",
+        # novos cargos (023)
+        """INSERT INTO cargos (nome, nivel_hierarquico) VALUES
+           ('mestre_banquete', 55), ('obreiro', 20), ('irmao_loja', 15)
+           ON CONFLICT (nome) DO NOTHING""",
+    ]
+    try:
+        with db.transaction() as tx:
+            for s in stmts:
+                tx.execute(s, [])
+    except Exception as exc:
+        print(f"[schema] aviso: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
     # Abre o connection pool
     db = get_database()
     db.open()
+    _ensure_schema(db)
 
     # Inicia o scheduler de tarefas diárias
     scheduler = get_scheduler()
@@ -1134,8 +1177,11 @@ async def criar_compra(
         fname = f"{uuid.uuid4().hex}{ext}"
         fpath = str(Path(base) / str(loja_id) / fname)
         Path(fpath).parent.mkdir(parents=True, exist_ok=True)
-        Path(fpath).write_bytes(content)
-        svc.adicionar_arquivo(compra_id, tipo, fpath, arq.filename, len(content), sha)
+        try:
+            Path(fpath).write_bytes(content)
+        except Exception:
+            fpath = None
+        svc.adicionar_arquivo(compra_id, tipo, fpath, arq.filename, len(content), sha, content)
     svc.notificar_nova_compra(compra_id, loja_id)
     return {"id": compra_id}
 
@@ -1192,6 +1238,28 @@ def download_arquivo_compra(
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{nome}"'},
     )
+
+
+@app.delete("/compras/{compra_id}/arquivo/{arquivo_id}", status_code=204)
+def excluir_arquivo_compra(
+    compra_id: int,
+    arquivo_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            "SELECT caminho FROM compras_arquivos WHERE id=%s AND compra_id=%s",
+            (arquivo_id, compra_id),
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+        tx.execute("DELETE FROM compras_arquivos WHERE id=%s", (arquivo_id,))
+    if row.get("caminho"):
+        import pathlib
+        p = pathlib.Path(row["caminho"])
+        if p.exists():
+            p.unlink(missing_ok=True)
 
 # ── Notificações destinatários ────────────────────────────────────────────
 

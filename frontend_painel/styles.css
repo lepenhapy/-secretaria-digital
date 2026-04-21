@@ -659,7 +659,8 @@ body {
 .compra-evento { font-weight:700; font-size:15px; color:var(--text); }
 .compra-meta { display:flex; flex-wrap:wrap; gap:12px; font-size:13px; color:var(--muted); margin-bottom:8px; }
 .compra-arquivos { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
-.arq-link { font-size:12px; color:var(--sb-active); text-decoration:none; background:#f0f7ff; padding:3px 8px; border-radius:6px; }
+.arq-link { font-size:12px; color:var(--sb-active); background:#f0f7ff; padding:3px 8px; border-radius:6px; border:none; cursor:pointer; }
+.arq-link-wrap { display:inline-flex; align-items:center; gap:4px; }
 .compra-obs { font-size:13px; color:var(--muted); background:#f8fafc; padding:6px 10px; border-radius:6px; margin-bottom:8px; }
 .compra-acoes { display:flex; gap:8px; flex-wrap:wrap; }
 .badge-status { padding:2px 10px; border-radius:20px; font-size:11px; font-weight:700; text-transform:uppercase; }

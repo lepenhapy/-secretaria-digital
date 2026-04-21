@@ -25,12 +25,14 @@ class ComprasService:
             return row["id"]
 
     def adicionar_arquivo(self, compra_id: int, tipo: str, caminho: str,
-                          nome_original: str, tamanho_bytes: int, sha256: str):
+                          nome_original: str, tamanho_bytes: int, sha256: str,
+                          conteudo: bytes = None):
         with self.db.transaction() as tx:
             tx.execute(
-                """INSERT INTO compras_arquivos (compra_id, tipo, caminho, nome_original, tamanho_bytes, sha256)
-                   VALUES (%s,%s,%s,%s,%s,%s)""",
-                (compra_id, tipo, caminho, nome_original, tamanho_bytes, sha256),
+                """INSERT INTO compras_arquivos
+                   (compra_id, tipo, caminho, nome_original, tamanho_bytes, sha256, conteudo)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                (compra_id, tipo, caminho, nome_original, tamanho_bytes, sha256, conteudo),
             )
 
     def listar_compras(self, loja_id: int, incluir_ocultos: bool = False,
@@ -115,13 +117,17 @@ class ComprasService:
     def arquivo_bytes(self, arquivo_id: int) -> Optional[tuple[bytes, str]]:
         with self.db.transaction() as tx:
             row = tx.fetch_one(
-                "SELECT caminho, nome_original FROM compras_arquivos WHERE id=%s",
+                "SELECT caminho, nome_original, conteudo FROM compras_arquivos WHERE id=%s",
                 (arquivo_id,),
             )
-        if not row or not os.path.exists(row["caminho"]):
+        if not row:
             return None
-        data = open(row["caminho"], "rb").read()
-        return data, row["nome_original"] or "arquivo"
+        nome = row["nome_original"] or "arquivo"
+        if row.get("caminho") and os.path.exists(row["caminho"]):
+            return open(row["caminho"], "rb").read(), nome
+        if row.get("conteudo"):
+            return bytes(row["conteudo"]), nome
+        return None
 
     # ── Notificações ──────────────────────────────────────────────────────────
 
