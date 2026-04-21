@@ -26,17 +26,20 @@ class RegistrationService:
             if not cargo:
                 raise DomainError("Cargo padrão não encontrado. Execute as migrations.")
 
-            token = secrets.token_urlsafe(32)
+            email_ok = self.email.configurado()
+            token = secrets.token_urlsafe(32) if email_ok else None
             tx.execute(
                 """
                 insert into usuarios
                   (nome, email, senha_hash, cargo_id, ativo, email_confirmado, confirmacao_token)
-                values (%s, %s, %s, %s, false, false, %s)
+                values (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                [nome, email, AuthService.hash_password(senha), cargo["id"], token],
+                [nome, email, AuthService.hash_password(senha), cargo["id"],
+                 not email_ok, not email_ok, token],
             )
 
-        self.email.send_confirmation(to_email=email, nome=nome, token=token)
+        if email_ok:
+            self.email.send_confirmation(to_email=email, nome=nome, token=token)
 
     def confirmar_email(self, token: str) -> dict:
         with self.db.transaction() as tx:

@@ -390,10 +390,23 @@ async function registrar() {
   msg.textContent = 'Criando conta…';
 
   try {
-    await api('POST', '/registrar', { nome, nome_usuario: usuario, email, senha });
-    document.getElementById('cadastroEmailEnviado').textContent = email;
-    document.getElementById('cadastroForm').style.display       = 'none';
-    document.getElementById('cadastroConfirmado').style.display = 'block';
+    const r = await api('POST', '/registrar', { nome, nome_usuario: usuario, email, senha });
+    if (r.status === 'active') {
+      document.getElementById('cadastroForm').style.display       = 'none';
+      document.getElementById('cadastroConfirmado').style.display = 'block';
+      document.getElementById('cadastroEmailEnviado').textContent = email;
+      document.querySelector('#cadastroConfirmado .modal-body div[style]').innerHTML =
+        `<div style="font-size:52px">✅</div>
+         <div style="font-size:18px;font-weight:700;margin-top:12px">Conta criada com sucesso!</div>
+         <div style="color:#64748b;margin-top:8px;line-height:1.6">
+           Sua conta está ativa. Faça login com o e-mail<br/>
+           <strong>${email}</strong>.
+         </div>`;
+    } else {
+      document.getElementById('cadastroEmailEnviado').textContent = email;
+      document.getElementById('cadastroForm').style.display       = 'none';
+      document.getElementById('cadastroConfirmado').style.display = 'block';
+    }
   } catch (e) {
     msg.className = 'modal-result error';
     msg.textContent = e.message || 'Erro ao criar conta.';
@@ -426,7 +439,7 @@ async function login() {
 function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
    'relatoriosView','permissoesView','comissoesView','repositorioView',
-   'agendaView','irmaoDetalheView'].forEach(v => {
+   'agendaView','irmaoDetalheView','usuariosView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -495,6 +508,9 @@ function renderSidebar() {
     <div class="sidebar-nav-module" id="nav-repositorio" onclick="abrirModulo('repositorio')">
       <span style="font-size:15px">🗄️</span><span>Repositório</span>
     </div>
+    <div class="sidebar-nav-module" id="nav-usuarios" onclick="abrirModulo('usuarios')">
+      <span style="font-size:15px">🔑</span><span>Usuários</span>
+    </div>
   `;
 
   // Cargos
@@ -530,6 +546,7 @@ function abrirModulo(id) {
     comissoes:      () => { mostrarView('comissoesView');   renderComissoesView(); },
     permissoes:     () => { mostrarView('permissoesView');  renderPermissoesView(); },
     repositorio:    () => { mostrarView('repositorioView'); renderRepositorioView(); },
+    usuarios:       () => { mostrarView('usuariosView');   renderUsuariosView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -2487,6 +2504,60 @@ async function togglePermissao(cargo, recurso, acao, checked, loja) {
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  GESTÃO DE USUÁRIOS
+// ═══════════════════════════════════════════════════════════
+
+async function renderUsuariosView() {
+  const el = document.getElementById('usuariosView');
+  el.innerHTML = `
+    <div class="view-header">
+      <h1>🔑 Usuários</h1>
+    </div>
+    <div id="usuariosLista"><div style="color:#94a3b8;padding:20px">Carregando…</div></div>
+  `;
+  await carregarUsuarios();
+}
+
+async function carregarUsuarios() {
+  const loja = state.usuario?.loja_id || 1;
+  try {
+    const lista = await api('GET', `/usuarios?loja_id=${loja}`);
+    const el = document.getElementById('usuariosLista');
+    if (!lista.length) { el.innerHTML = '<p style="color:#94a3b8">Nenhum usuário cadastrado.</p>'; return; }
+    el.innerHTML = lista.map(u => `
+      <div class="rateio-item" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-weight:600">${u.nome}</div>
+          <div style="font-size:12px;color:#64748b">${u.email} · ${(u.cargo||'').replace(/_/g,' ')}</div>
+          <div style="font-size:11px;margin-top:2px">
+            ${u.ativo
+              ? '<span style="color:#16a34a">● Ativo</span>'
+              : '<span style="color:#dc2626">● Inativo / aguardando confirmação</span>'}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          ${!u.ativo ? `<button class="func-btn primary" style="font-size:12px;padding:4px 12px" onclick="ativarUsuario(${u.id})">✓ Ativar</button>` : ''}
+          <button class="func-btn danger" style="font-size:12px;padding:4px 12px" onclick="excluirUsuario(${u.id}, '${(u.nome||'').replace(/'/g,"\\'")}')">🗑 Excluir</button>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    document.getElementById('usuariosLista').innerHTML = `<p style="color:#dc2626">${e.message}</p>`;
+  }
+}
+
+async function ativarUsuario(id) {
+  try { await api('PUT', `/usuarios/${id}/ativar`); carregarUsuarios(); }
+  catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function excluirUsuario(id, nome) {
+  if (!confirm(`Excluir o usuário "${nome}"? Esta ação não pode ser desfeita.`)) return;
+  try { await api('DELETE', `/usuarios/${id}`); carregarUsuarios(); }
+  catch(e) { alert('Erro: ' + e.message); }
+}
 
 // Fecha sidebar ao navegar (mobile)
 function _navClick() {

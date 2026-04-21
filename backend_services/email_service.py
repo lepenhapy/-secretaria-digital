@@ -13,6 +13,9 @@ class EmailService:
         self.from_    = os.getenv('SMTP_FROM', self.user)
         self.base_url = os.getenv('BASE_URL', 'http://127.0.0.1:8001')
 
+    def configurado(self) -> bool:
+        return bool(self.user and self.password)
+
     def send_confirmation(self, to_email: str, nome: str, token: str) -> None:
         link = f"{self.base_url}/confirmar/{token}"
 

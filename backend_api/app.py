@@ -587,8 +587,11 @@ def registrar(payload: RegisterInput, reg: RegistrationService = Depends(get_reg
     except DomainError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao enviar e-mail de confirmação: {exc}") from exc
-    return {"status": "confirmation_sent"}
+        raise HTTPException(status_code=500, detail=f"Erro ao criar conta: {exc}") from exc
+    email_cfg = get_registration_service().email.configurado()
+    if email_cfg:
+        return {"status": "confirmation_sent"}
+    return {"status": "active", "aviso": "E-mail não configurado. Conta ativa imediatamente."}
 
 
 @app.get("/confirmar/{token}")
@@ -609,6 +612,58 @@ def confirmar_email(token: str, reg: RegistrationService = Depends(get_registrat
       <a href='javascript:window.close()' style='color:#2563eb'>Fechar</a>
     </body></html>
     """)
+
+
+# ═══════════════════════════════════════════════════════════
+#  GESTÃO DE USUÁRIOS (admin)
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/usuarios")
+def listar_usuarios(
+    loja_id: Optional[int] = Query(default=None),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        cond = "WHERE u.deleted_at IS NULL"
+        params: list = []
+        if loja_id:
+            cond += " AND u.loja_id=%s"; params.append(loja_id)
+        return tx.fetch_all(
+            f"""SELECT u.id, u.nome, u.email, u.ativo, u.email_confirmado,
+                       u.loja_id, c.nome AS cargo, u.created_at
+                FROM usuarios u
+                JOIN cargos c ON c.id = u.cargo_id
+                {cond} ORDER BY u.nome""",
+            params,
+        )
+
+
+@app.put("/usuarios/{usuario_id}/ativar")
+def ativar_usuario(
+    usuario_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE usuarios SET ativo=TRUE, email_confirmado=TRUE, confirmacao_token=NULL WHERE id=%s",
+            (usuario_id,),
+        )
+    return {"status": "activated"}
+
+
+@app.delete("/usuarios/{usuario_id}", status_code=204)
+def excluir_usuario(
+    usuario_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE usuarios SET deleted_at=NOW(), ativo=FALSE WHERE id=%s",
+            (usuario_id,),
+        )
 
 
 # ═══════════════════════════════════════════════════════════
