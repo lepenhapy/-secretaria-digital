@@ -490,6 +490,7 @@ function renderAutenticado(me) {
   document.getElementById('userName').textContent       = me.nome || me.email;
   const cargo = CARGOS.find(c => c.id === me.cargo) || { label: me.cargo };
   document.getElementById('userCargoLabel').textContent = cargo.label;
+  renderSidebar();
   const ini = (me.nome || me.email || '?')[0].toUpperCase();
   document.getElementById('userAvatar').textContent = ini;
   mostrarView('homeView');
