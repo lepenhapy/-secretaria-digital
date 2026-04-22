@@ -361,26 +361,44 @@ def _ensure_schema(db) -> None:
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
-    # Abre o connection pool
+    import asyncio
+
     db = get_database()
-    db.open()
-    _ensure_schema(db)
+
+    # Abre o pool e roda migrações em thread separada para não bloquear o event loop
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, db.open)
+        await loop.run_in_executor(None, _ensure_schema, db)
+    except Exception as exc:
+        print(f"[startup] aviso na inicialização do DB: {exc}")
 
     # Inicia o scheduler de tarefas diárias
-    scheduler = get_scheduler()
-    birthday_svc = get_birthday_service()
+    try:
+        scheduler = get_scheduler()
+        birthday_svc = get_birthday_service()
+        loja_id_default = int(os.getenv('DEFAULT_LOJA_ID', '1'))
+        scheduler.add_daily(
+            hora='08:00',
+            func=lambda: birthday_svc.notificar_hoje(loja_id_default),
+            label='Aniversários do dia',
+        )
+        scheduler.start()
+    except Exception as exc:
+        print(f"[startup] aviso no scheduler: {exc}")
+        scheduler = None
 
-    loja_id_default = int(os.getenv('DEFAULT_LOJA_ID', '1'))
-
-    scheduler.add_daily(
-        hora='08:00',
-        func=lambda: birthday_svc.notificar_hoje(loja_id_default),
-        label='Aniversários do dia',
-    )
-    scheduler.start()
     yield
-    scheduler.stop()
-    db.close()
+
+    if scheduler:
+        try:
+            scheduler.stop()
+        except Exception:
+            pass
+    try:
+        db.close()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="Secretaria Digital", lifespan=lifespan)
