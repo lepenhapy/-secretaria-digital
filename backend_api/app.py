@@ -52,6 +52,45 @@ from backend_services.core_transaction_services import (
 def _ensure_schema(db) -> None:
     """Aplica DDL incremental na inicialização — idempotente."""
     stmts = [
+        # recursos (002)
+        """CREATE TABLE IF NOT EXISTS recursos (
+            id BIGSERIAL PRIMARY KEY, nome VARCHAR(150) NOT NULL,
+            tipo VARCHAR(50) NOT NULL DEFAULT 'outro',
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
+        # auditoria_eventos (010)
+        """CREATE TABLE IF NOT EXISTS auditoria_eventos (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT REFERENCES lojas(id),
+            usuario_id BIGINT REFERENCES usuarios(id),
+            cargo_snapshot VARCHAR(100),
+            acao VARCHAR(100) NOT NULL,
+            modulo VARCHAR(50) NOT NULL,
+            entidade_tipo VARCHAR(50),
+            entidade_id BIGINT,
+            detalhes_json JSONB,
+            origem VARCHAR(30) NOT NULL DEFAULT 'painel',
+            exigiu_reautenticacao BOOLEAN NOT NULL DEFAULT FALSE,
+            ocorreu_em TIMESTAMP NOT NULL DEFAULT NOW())""",
+        # contratos (003)
+        """CREATE TABLE IF NOT EXISTS contratos (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT NOT NULL REFERENCES lojas(id),
+            templo_id BIGINT REFERENCES recursos(id),
+            status VARCHAR(30) NOT NULL DEFAULT 'rascunho',
+            arquivo_url TEXT,
+            vigencia_inicio DATE,
+            vigencia_fim DATE,
+            regra_recorrencia VARCHAR(150),
+            hora_inicio_sessao TIME,
+            hora_fim_sessao TIME,
+            created_by_usuario_id BIGINT REFERENCES usuarios(id),
+            updated_by_usuario_id BIGINT REFERENCES usuarios(id),
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
         # migration 023
         "ALTER TABLE repositorio_arquivos ADD COLUMN IF NOT EXISTS conteudo BYTEA",
         # migration 024 – tabelas novas
