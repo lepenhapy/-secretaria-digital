@@ -91,6 +91,29 @@ class WhatsAppService:
         r.raise_for_status()
         return r.json()
 
+    def conectar_ou_criar(self) -> dict:
+        """Tenta obter QR code; se instância não existe, cria primeiro."""
+        try:
+            r = requests.get(
+                self._url(f'instance/connect/{self.instance}'),
+                headers=self._headers(), timeout=15,
+            )
+            if r.status_code == 404:
+                # Instância não existe — cria e tenta de novo
+                self.criar_instancia()
+                import time
+                time.sleep(1)
+                r2 = requests.get(
+                    self._url(f'instance/connect/{self.instance}'),
+                    headers=self._headers(), timeout=15,
+                )
+                r2.raise_for_status()
+                return r2.json()
+            r.raise_for_status()
+            return r.json()
+        except Exception as exc:
+            raise exc
+
     def criar_instancia(self) -> dict:
         payload = {
             'instanceName': self.instance,

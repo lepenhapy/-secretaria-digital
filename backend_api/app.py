@@ -2098,13 +2098,12 @@ def whatsapp_qrcode(
 ):
     if actor.cargo not in ("admin_principal", "veneravel_mestre"):
         raise HTTPException(status_code=403, detail="Sem permissão.")
-    try:
-        return wpp.get_qrcode()
-    except Exception:
-        try:
-            return wpp.criar_instancia()
-        except Exception as exc2:
-            raise HTTPException(status_code=500, detail=str(exc2)) from exc2
+    if not wpp.base_url or "localhost" in wpp.base_url:
+        raise HTTPException(
+            status_code=503,
+            detail="EVOLUTION_API_URL não configurada. Adicione a variável no Railway.",
+        )
+    return wpp.conectar_ou_criar()
 
 
 @app.post("/whatsapp/conectar")
@@ -2114,13 +2113,12 @@ def whatsapp_conectar(
 ):
     if actor.cargo not in ("admin_principal", "veneravel_mestre"):
         raise HTTPException(status_code=403, detail="Sem permissão.")
-    try:
-        return wpp.criar_instancia()
-    except Exception:
-        try:
-            return wpp.get_qrcode()
-        except Exception as exc2:
-            raise HTTPException(status_code=500, detail=str(exc2)) from exc2
+    if not wpp.base_url or "localhost" in wpp.base_url:
+        raise HTTPException(
+            status_code=503,
+            detail="EVOLUTION_API_URL não configurada. Adicione a variável no Railway.",
+        )
+    return wpp.conectar_ou_criar()
 
 
 @app.post("/whatsapp/configurar-webhook")
