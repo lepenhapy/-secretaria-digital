@@ -12,6 +12,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from fastapi import Request
+
 from backend_api.dependencies import (
     get_agenda_service,
     get_birthday_service,
@@ -28,8 +30,11 @@ from backend_api.dependencies import (
     get_relatorios_service,
     get_scheduler,
     get_services,
+    get_whatsapp_bot,
     get_whatsapp_service,
 )
+from backend_services.whatsapp_bot import WhatsAppBot
+from backend_services.whatsapp_service import WhatsAppService
 from backend_services.agenda_service import AgendaService
 from backend_services.comissoes_service import ComissoesService
 from backend_services.compras_service import ComprasService
@@ -336,8 +341,9 @@ def _ensure_schema(db) -> None:
             usuario_id INT NOT NULL, titulo TEXT NOT NULL,
             mensagem TEXT, lido BOOLEAN NOT NULL DEFAULT FALSE,
             criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
-        # ── 025: irmaos.cargo_loja ────────────────────────────────────────────
+        # ── 025: irmaos.cargo_loja / whatsapp ────────────────────────────────
         "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS cargo_loja TEXT",
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(30)",
         # ── 026: compras_arquivos.conteudo ────────────────────────────────────
         "ALTER TABLE compras_arquivos ADD COLUMN IF NOT EXISTS conteudo BYTEA",
         # ── cargos extras ─────────────────────────────────────────────────────
@@ -2017,17 +2023,118 @@ async def upload_repositorio(
     return {"salvos": salvos}
 
 
-# ── WhatsApp: status da instância ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════
+#  WHATSAPP — controle da instância + webhook do bot
+# ═══════════════════════════════════════════════════════════
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(
+    request: Request,
+    bot: WhatsAppBot = Depends(get_whatsapp_bot),
+):
+    """Webhook da Evolution API — recebe todas as mensagens."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"status": "error", "detail": "invalid JSON"}
+
+    event = body.get("event", "")
+
+    if event == "messages.upsert":
+        data = body.get("data", {})
+        key  = data.get("key", {})
+
+        if key.get("fromMe"):
+            return {"status": "ignored", "motivo": "fromMe"}
+
+        remote_jid = key.get("remoteJid", "")
+        if "@g.us" in remote_jid:
+            return {"status": "ignored", "motivo": "grupo"}
+
+        telefone    = remote_jid.split("@")[0]
+        message     = data.get("message", {})
+        msg_type    = data.get("messageType", "")
+        push_name   = data.get("pushName", "")
+        loja_id     = int(os.getenv("DEFAULT_LOJA_ID", "1"))
+
+        return bot.processar(loja_id, telefone, msg_type, message, push_name)
+
+    return {"status": "ok", "event": event}
+
 
 @app.get("/whatsapp/status")
 def whatsapp_status(
     actor: Actor = Depends(get_current_actor),
-    wpp=Depends(get_whatsapp_service),
+    wpp: WhatsAppService = Depends(get_whatsapp_service),
 ):
     try:
         return wpp.status()
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
+
+
+@app.get("/whatsapp/qrcode")
+def whatsapp_qrcode(
+    actor: Actor = Depends(get_current_actor),
+    wpp: WhatsAppService = Depends(get_whatsapp_service),
+):
+    if actor.cargo not in ("admin_principal", "veneravel_mestre"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    try:
+        return wpp.get_qrcode()
+    except Exception:
+        try:
+            return wpp.criar_instancia()
+        except Exception as exc2:
+            raise HTTPException(status_code=500, detail=str(exc2)) from exc2
+
+
+@app.post("/whatsapp/conectar")
+def whatsapp_conectar(
+    actor: Actor = Depends(get_current_actor),
+    wpp: WhatsAppService = Depends(get_whatsapp_service),
+):
+    if actor.cargo not in ("admin_principal", "veneravel_mestre"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    try:
+        return wpp.criar_instancia()
+    except Exception:
+        try:
+            return wpp.get_qrcode()
+        except Exception as exc2:
+            raise HTTPException(status_code=500, detail=str(exc2)) from exc2
+
+
+@app.post("/whatsapp/configurar-webhook")
+def whatsapp_configurar_webhook(
+    actor: Actor = Depends(get_current_actor),
+    wpp: WhatsAppService = Depends(get_whatsapp_service),
+):
+    if actor.cargo != "admin_principal":
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    base = os.getenv("WEBHOOK_URL", "").rstrip("/")
+    if not base:
+        raise HTTPException(
+            status_code=400,
+            detail="Variável WEBHOOK_URL não configurada no servidor.",
+        )
+    try:
+        return wpp.configurar_webhook(f"{base}/whatsapp/webhook")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.delete("/whatsapp/desconectar", status_code=200)
+def whatsapp_desconectar(
+    actor: Actor = Depends(get_current_actor),
+    wpp: WhatsAppService = Depends(get_whatsapp_service),
+):
+    if actor.cargo not in ("admin_principal", "veneravel_mestre"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    try:
+        return wpp.desconectar()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # ═══════════════════════════════════════════════════════════

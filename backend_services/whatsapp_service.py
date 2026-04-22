@@ -90,3 +90,58 @@ class WhatsAppService:
         )
         r.raise_for_status()
         return r.json()
+
+    def criar_instancia(self) -> dict:
+        payload = {
+            'instanceName': self.instance,
+            'qrcode': True,
+            'integration': 'WHATSAPP-BAILEYS',
+        }
+        r = requests.post(
+            self._url('instance/create'),
+            json=payload, headers=self._headers(), timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def get_qrcode(self) -> dict:
+        r = requests.get(
+            self._url(f'instance/connect/{self.instance}'),
+            headers=self._headers(), timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def configurar_webhook(self, webhook_url: str) -> dict:
+        payload = {
+            'url': webhook_url,
+            'byEvents': True,
+            'base64': True,
+            'events': [
+                'MESSAGES_UPSERT',
+                'CONNECTION_UPDATE',
+                'QRCODE_UPDATED',
+            ],
+        }
+        r = requests.post(
+            self._url(f'webhook/set/{self.instance}'),
+            json=payload, headers=self._headers(), timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def desconectar(self) -> dict:
+        r = requests.delete(
+            self._url(f'instance/logout/{self.instance}'),
+            headers=self._headers(), timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def listar_instancias(self) -> list:
+        r = requests.get(
+            self._url('instance/fetchInstances'),
+            headers=self._headers(), timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()

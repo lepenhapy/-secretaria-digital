@@ -465,7 +465,7 @@ async function login() {
 function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
    'relatoriosView','permissoesView','comissoesView','repositorioView',
-   'agendaView','irmaoDetalheView','usuariosView','inventarioView'].forEach(v => {
+   'agendaView','irmaoDetalheView','usuariosView','inventarioView','whatsappView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -546,6 +546,11 @@ function renderSidebar() {
       <span style="font-size:15px">🔔</span><span>Notificações</span>
       <span id="notifBadge" style="display:none;background:#dc2626;color:#fff;border-radius:9px;padding:1px 6px;font-size:10px;margin-left:auto"></span>
     </div>
+    ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo) ? `
+    <div class="sidebar-nav-module" id="nav-whatsapp" onclick="abrirModulo('whatsapp')">
+      <span style="font-size:15px">💬</span><span>WhatsApp</span>
+      <span id="wppStatusDot" style="width:8px;height:8px;border-radius:50%;background:#94a3b8;display:inline-block;margin-left:auto"></span>
+    </div>` : ''}
   `;
 
   // Cargos
@@ -583,6 +588,7 @@ function abrirModulo(id) {
     repositorio:    () => { mostrarView('repositorioView'); renderRepositorioView(); },
     usuarios:       () => { mostrarView('usuariosView');   renderUsuariosView(); },
     inventario:     () => { mostrarView('inventarioView'); renderInventarioView(); },
+    whatsapp:       () => { mostrarView('whatsappView');   renderWhatsAppView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -3154,6 +3160,183 @@ async function marcarTodasNotifLidas(loja) {
     atualizarBadgeNotif();
     fecharModal();
   } catch(e) { alert(e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  WHATSAPP — painel de controle da instância
+// ═══════════════════════════════════════════════════════════
+
+async function renderWhatsAppView() {
+  const el = document.getElementById('whatsappView');
+  el.innerHTML = `
+    <div class="view-header">
+      <h1>💬 WhatsApp</h1>
+    </div>
+    <div id="wppPainel"><div class="loading">Verificando conexão…</div></div>
+  `;
+  await _wppCarregarStatus();
+}
+
+async function _wppCarregarStatus() {
+  const el = document.getElementById('wppPainel');
+  if (!el) return;
+  try {
+    const r = await api('GET', '/whatsapp/status');
+    const state_wpp = r?.instance?.state || r?.state || 'unknown';
+    const connected = state_wpp === 'open';
+
+    // Atualiza ponto verde/vermelho no sidebar
+    const dot = document.getElementById('wppStatusDot');
+    if (dot) dot.style.background = connected ? '#16a34a' : '#dc2626';
+
+    if (connected) {
+      const numero = r?.instance?.profileName || r?.profileName || '';
+      el.innerHTML = `
+        <div class="wpp-status-card connected">
+          <div class="wpp-status-icon">✅</div>
+          <div>
+            <div class="wpp-status-title">WhatsApp conectado</div>
+            ${numero ? `<div class="wpp-status-sub">${numero}</div>` : ''}
+          </div>
+        </div>
+        <div class="wpp-actions">
+          <button class="btn-primary" onclick="_wppConfigurarWebhook()">⚙️ Configurar Webhook</button>
+          <button class="func-btn neutral" onclick="_wppDesconectar()">Desconectar</button>
+        </div>
+        <div class="wpp-info-box">
+          <strong>Bot ativo</strong> — os irmãos podem mandar mensagem para o número e receber:
+          <ul>
+            <li>Menu de opções (1, 2, 3)</li>
+            <li>Fotos/PDFs de comprovantes → registrados como reembolso automaticamente</li>
+            <li>Próximas sessões e eventos</li>
+            <li>Status da mensalidade</li>
+          </ul>
+          <p style="margin-top:8px;color:#64748b;font-size:12px">
+            Para que o número de cada irmão seja reconhecido, cadastre o WhatsApp dele na tela de <strong>Cadastro de Irmãos</strong>.
+          </p>
+        </div>
+      `;
+    } else {
+      el.innerHTML = `
+        <div class="wpp-status-card disconnected">
+          <div class="wpp-status-icon">📵</div>
+          <div>
+            <div class="wpp-status-title">WhatsApp desconectado</div>
+            <div class="wpp-status-sub">Clique em Conectar para gerar o QR Code</div>
+          </div>
+        </div>
+        <div class="wpp-actions">
+          <button class="btn-primary" onclick="_wppConectar()">📲 Conectar / Gerar QR Code</button>
+        </div>
+        <div id="wppQrArea"></div>
+      `;
+    }
+  } catch(e) {
+    el.innerHTML = `
+      <div class="wpp-status-card disconnected">
+        <div class="wpp-status-icon">⚠️</div>
+        <div>
+          <div class="wpp-status-title">Evolution API não encontrada</div>
+          <div class="wpp-status-sub">Verifique se EVOLUTION_API_URL está configurada no Railway</div>
+        </div>
+      </div>
+      <div class="wpp-actions">
+        <button class="btn-primary" onclick="_wppConectar()">📲 Tentar conectar</button>
+      </div>
+      <div id="wppQrArea"></div>
+      <div class="wpp-info-box" style="margin-top:16px">
+        <strong>Como configurar a Evolution API no Railway:</strong>
+        <ol>
+          <li>Acesse <strong>railway.app</strong> → seu projeto → <em>+ New Service</em> → <em>Docker Image</em></li>
+          <li>Imagem: <code>atendai/evolution-api:v2.2.3</code></li>
+          <li>Adicione as variáveis de ambiente:<br>
+            <code>AUTHENTICATION_TYPE=apikey</code><br>
+            <code>AUTHENTICATION_API_KEY=sua-chave-aqui</code><br>
+            <code>WEBHOOK_GLOBAL_ENABLED=true</code><br>
+            <code>WEBHOOK_GLOBAL_URL=https://SEU-BACKEND.railway.app/whatsapp/webhook</code><br>
+            <code>WEBHOOK_GLOBAL_WEBHOOK_BASE64=true</code>
+          </li>
+          <li>No backend, adicione:<br>
+            <code>EVOLUTION_API_URL=https://sua-evolution.railway.app</code><br>
+            <code>EVOLUTION_API_KEY=sua-chave-aqui</code><br>
+            <code>EVOLUTION_INSTANCE=secretaria</code><br>
+            <code>WEBHOOK_URL=https://SEU-BACKEND.railway.app</code>
+          </li>
+          <li>Volte aqui e clique em <strong>Conectar</strong></li>
+        </ol>
+      </div>
+    `;
+  }
+}
+
+async function _wppConectar() {
+  const area = document.getElementById('wppQrArea');
+  if (area) area.innerHTML = '<div class="loading">Conectando…</div>';
+  try {
+    const r = await api('POST', '/whatsapp/conectar');
+    const qr = r?.qrcode?.base64 || r?.base64 || r?.qr || '';
+    if (qr && area) {
+      const src = qr.startsWith('data:') ? qr : `data:image/png;base64,${qr}`;
+      area.innerHTML = `
+        <div class="wpp-qr-wrap">
+          <p style="font-weight:600;margin-bottom:12px">Escaneie o QR Code com o WhatsApp do número da loja:</p>
+          <img src="${src}" class="wpp-qr-img" alt="QR Code WhatsApp" />
+          <p style="font-size:12px;color:#64748b;margin-top:8px">O QR Code expira em ~60 segundos. Atualize se necessário.</p>
+          <button class="func-btn neutral" style="margin-top:8px" onclick="_wppCarregarQR()">🔄 Novo QR Code</button>
+          <button class="btn-primary" style="margin-top:8px" onclick="_wppCarregarStatus()">✅ Já escanei</button>
+        </div>
+      `;
+    } else {
+      if (area) area.innerHTML = '<p class="empty-msg">Instância criada. Aguarde e clique em "Gerar QR Code".</p>';
+      setTimeout(_wppCarregarQR, 2000);
+    }
+  } catch(e) {
+    if (area) area.innerHTML = `<p class="error-msg">Erro: ${e.message}</p>`;
+  }
+}
+
+async function _wppCarregarQR() {
+  const area = document.getElementById('wppQrArea');
+  if (area) area.innerHTML = '<div class="loading">Buscando QR Code…</div>';
+  try {
+    const r = await api('GET', '/whatsapp/qrcode');
+    const qr = r?.qrcode?.base64 || r?.base64 || r?.qr || '';
+    if (qr && area) {
+      const src = qr.startsWith('data:') ? qr : `data:image/png;base64,${qr}`;
+      area.innerHTML = `
+        <div class="wpp-qr-wrap">
+          <p style="font-weight:600;margin-bottom:12px">Escaneie com o WhatsApp do número da loja:</p>
+          <img src="${src}" class="wpp-qr-img" alt="QR Code WhatsApp" />
+          <p style="font-size:12px;color:#64748b;margin-top:8px">QR Code expira em ~60 segundos.</p>
+          <button class="func-btn neutral" style="margin-top:8px" onclick="_wppCarregarQR()">🔄 Novo QR Code</button>
+          <button class="btn-primary" style="margin-top:8px" onclick="_wppCarregarStatus()">✅ Já escanei</button>
+        </div>
+      `;
+    } else {
+      if (area) area.innerHTML = '<p class="empty-msg">QR Code não disponível ainda. Tente novamente.</p>';
+    }
+  } catch(e) {
+    if (area) area.innerHTML = `<p class="error-msg">Erro: ${e.message}</p>`;
+  }
+}
+
+async function _wppConfigurarWebhook() {
+  try {
+    await api('POST', '/whatsapp/configurar-webhook');
+    alert('Webhook configurado com sucesso!');
+  } catch(e) {
+    alert('Erro ao configurar webhook: ' + e.message);
+  }
+}
+
+async function _wppDesconectar() {
+  if (!confirm('Desconectar o WhatsApp? O bot deixará de funcionar até reconectar.')) return;
+  try {
+    await api('DELETE', '/whatsapp/desconectar');
+    await _wppCarregarStatus();
+  } catch(e) {
+    alert('Erro: ' + e.message);
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

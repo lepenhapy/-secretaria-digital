@@ -753,6 +753,21 @@ body {
 .badge-ctx.comprovante  { background:#f0fdf4; color:#166534; }
 .badge-ctx.outro        { background:#f1f5f9; color:#475569; }
 
+/* ── WhatsApp ────────────────────────────────────────────────── */
+.wpp-status-card { display:flex; align-items:center; gap:16px; background:#fff; border-radius:14px; padding:20px 24px; box-shadow:var(--shadow); margin-bottom:20px; }
+.wpp-status-card.connected { border-left:4px solid #16a34a; }
+.wpp-status-card.disconnected { border-left:4px solid #dc2626; }
+.wpp-status-icon { font-size:32px; }
+.wpp-status-title { font-size:16px; font-weight:700; }
+.wpp-status-sub { font-size:13px; color:var(--muted); margin-top:3px; }
+.wpp-actions { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; }
+.wpp-qr-wrap { background:#fff; border-radius:14px; padding:24px; box-shadow:var(--shadow); display:inline-flex; flex-direction:column; align-items:center; margin-top:4px; }
+.wpp-qr-img { width:240px; height:240px; border:1px solid var(--border); border-radius:8px; }
+.wpp-info-box { background:#f8fafc; border:1px solid var(--border); border-radius:12px; padding:16px 20px; font-size:13px; line-height:1.7; }
+.wpp-info-box ul { padding-left:20px; margin:6px 0; }
+.wpp-info-box ol { padding-left:20px; margin:6px 0; }
+.wpp-info-box code { background:#e2e8f0; border-radius:4px; padding:1px 5px; font-size:12px; }
+
 @media print {
   .sidebar, .hamburger, .sidebar-overlay, .relat-tabs, .relat-filtros, .btn-primary, .print-only-btn { display:none !important; }
   .main { margin:0; padding:0; }

@@ -21,6 +21,7 @@ from backend_services.rateio_service import RateioService
 from backend_services.registration_service import RegistrationService
 from backend_services.relatorios_service import RelatoriosService
 from backend_services.scheduler import Scheduler
+from backend_services.whatsapp_bot import WhatsAppBot
 from backend_services.whatsapp_service import WhatsAppService
 
 
@@ -37,6 +38,7 @@ _calendar_service = None
 _scheduler = None
 _compras_service = None
 _rateio_service = None
+_whatsapp_bot = None
 _relatorios_service = None
 _permissoes_service = None
 _comissoes_service = None
@@ -182,6 +184,17 @@ def get_agenda_service():
     if _agenda_service is None:
         _agenda_service = AgendaService(db=get_database())
     return _agenda_service
+
+
+def get_whatsapp_bot():
+    global _whatsapp_bot
+    if _whatsapp_bot is None:
+        _whatsapp_bot = WhatsAppBot(
+            db=get_database(),
+            whatsapp_service=get_whatsapp_service(),
+            storage=get_file_storage(),
+        )
+    return _whatsapp_bot
 
 
 def get_current_actor(
