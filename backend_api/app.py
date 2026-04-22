@@ -52,7 +52,7 @@ from backend_services.core_transaction_services import (
 def _ensure_schema(db) -> None:
     """Aplica DDL incremental na inicialização — idempotente."""
     stmts = [
-        # recursos (002)
+        # ── 002: recursos ────────────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS recursos (
             id BIGSERIAL PRIMARY KEY, nome VARCHAR(150) NOT NULL,
             tipo VARCHAR(50) NOT NULL DEFAULT 'outro',
@@ -60,7 +60,7 @@ def _ensure_schema(db) -> None:
             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
             deleted_at TIMESTAMP)""",
-        # auditoria_eventos (010)
+        # ── 010: auditoria_eventos ────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS auditoria_eventos (
             id BIGSERIAL PRIMARY KEY,
             loja_id BIGINT REFERENCES lojas(id),
@@ -74,7 +74,7 @@ def _ensure_schema(db) -> None:
             origem VARCHAR(30) NOT NULL DEFAULT 'painel',
             exigiu_reautenticacao BOOLEAN NOT NULL DEFAULT FALSE,
             ocorreu_em TIMESTAMP NOT NULL DEFAULT NOW())""",
-        # contratos (003)
+        # ── 003: contratos (depende de recursos) ─────────────────────────────
         """CREATE TABLE IF NOT EXISTS contratos (
             id BIGSERIAL PRIMARY KEY,
             loja_id BIGINT NOT NULL REFERENCES lojas(id),
@@ -91,9 +91,232 @@ def _ensure_schema(db) -> None:
             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
             deleted_at TIMESTAMP)""",
-        # migration 023
+        # ── 004: agenda_slots (depende de contratos, recursos) ────────────────
+        """CREATE TABLE IF NOT EXISTS agenda_slots (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT NOT NULL REFERENCES lojas(id),
+            contrato_id BIGINT REFERENCES contratos(id),
+            recurso_id BIGINT NOT NULL REFERENCES recursos(id),
+            regra VARCHAR(150) NOT NULL,
+            hora_inicio TIME NOT NULL,
+            hora_fim TIME NOT NULL,
+            vigencia_inicio DATE NOT NULL,
+            vigencia_fim DATE,
+            status VARCHAR(30) NOT NULL DEFAULT 'ativo',
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
+        # ── 005: mensagens ────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS mensagens (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT REFERENCES lojas(id),
+            irmao_id BIGINT REFERENCES irmaos(id),
+            message_external_id VARCHAR(255),
+            tipo VARCHAR(30) NOT NULL DEFAULT 'texto',
+            contexto VARCHAR(50),
+            texto TEXT,
+            arquivo_url TEXT,
+            audio_url TEXT,
+            transcricao TEXT,
+            status VARCHAR(30) NOT NULL DEFAULT 'novo',
+            enviado_por_telefone VARCHAR(30),
+            created_at TIMESTAMP NOT NULL DEFAULT NOW())""",
+        # ── 006: casos_operacionais ───────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS casos_operacionais (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT NOT NULL REFERENCES lojas(id),
+            tipo_caso VARCHAR(50) NOT NULL DEFAULT 'documento',
+            subtipo VARCHAR(50),
+            criado_por_irmao_id BIGINT REFERENCES irmaos(id),
+            criado_por_usuario_id BIGINT REFERENCES usuarios(id),
+            responsavel_usuario_id BIGINT REFERENCES usuarios(id),
+            origem VARCHAR(30) NOT NULL DEFAULT 'painel',
+            status VARCHAR(30) NOT NULL DEFAULT 'novo',
+            titulo VARCHAR(200) NOT NULL,
+            descricao_resumida TEXT,
+            valor_informado NUMERIC(12,2),
+            valor_confirmado NUMERIC(12,2),
+            data_referencia DATE,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
+        # ── 007: arquivos, evidencias, acessos_arquivo ────────────────────────
+        """CREATE TABLE IF NOT EXISTS arquivos (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT NOT NULL REFERENCES lojas(id),
+            irmao_id BIGINT REFERENCES irmaos(id),
+            contrato_id BIGINT REFERENCES contratos(id),
+            caso_id BIGINT REFERENCES casos_operacionais(id),
+            categoria VARCHAR(50) NOT NULL DEFAULT 'geral',
+            nome_original VARCHAR(255) NOT NULL,
+            tipo_mime VARCHAR(120),
+            tamanho_bytes BIGINT,
+            sha256 VARCHAR(64),
+            url_armazenamento TEXT NOT NULL DEFAULT '',
+            origem_envio VARCHAR(30) NOT NULL DEFAULT 'admin',
+            status VARCHAR(30) NOT NULL DEFAULT 'ativo',
+            enviado_por_usuario_id BIGINT REFERENCES usuarios(id),
+            enviado_por_telefone VARCHAR(30),
+            data_envio TIMESTAMP NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
+        """CREATE TABLE IF NOT EXISTS evidencias (
+            id BIGSERIAL PRIMARY KEY,
+            caso_id BIGINT NOT NULL REFERENCES casos_operacionais(id),
+            arquivo_id BIGINT REFERENCES arquivos(id),
+            tipo VARCHAR(30) NOT NULL DEFAULT 'arquivo',
+            texto_extraido TEXT,
+            transcricao TEXT,
+            enviado_por_telefone VARCHAR(30),
+            data_envio TIMESTAMP NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS acessos_arquivo (
+            id BIGSERIAL PRIMARY KEY,
+            arquivo_id BIGINT NOT NULL REFERENCES arquivos(id),
+            usuario_id BIGINT NOT NULL REFERENCES usuarios(id),
+            acao VARCHAR(30) NOT NULL DEFAULT 'visualizou',
+            origem VARCHAR(30) NOT NULL DEFAULT 'painel',
+            data_hora TIMESTAMP NOT NULL DEFAULT NOW())""",
+        # ── 008: cobrancas ────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS cobrancas (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT NOT NULL REFERENCES lojas(id),
+            contrato_id BIGINT REFERENCES contratos(id),
+            competencia VARCHAR(7) NOT NULL,
+            valor NUMERIC(12,2) NOT NULL DEFAULT 0,
+            data_vencimento DATE NOT NULL DEFAULT CURRENT_DATE,
+            boleto_url TEXT,
+            status VARCHAR(30) NOT NULL DEFAULT 'pendente',
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
+        # ── 009: aprovacoes ───────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS aprovacoes (
+            id BIGSERIAL PRIMARY KEY,
+            entidade_tipo VARCHAR(50) NOT NULL,
+            entidade_id BIGINT NOT NULL,
+            etapa VARCHAR(50),
+            aprovado_por_usuario_id BIGINT NOT NULL REFERENCES usuarios(id),
+            delegacao_id BIGINT REFERENCES delegacoes(id),
+            decisao VARCHAR(20) NOT NULL DEFAULT 'aprovado',
+            observacao TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW())""",
+        # ── 011: sessoes_whatsapp ─────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS sessoes_whatsapp (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT REFERENCES lojas(id),
+            irmao_id BIGINT REFERENCES irmaos(id),
+            usuario_id BIGINT REFERENCES usuarios(id),
+            telefone VARCHAR(30) NOT NULL,
+            contexto_ativo VARCHAR(50) NOT NULL DEFAULT 'inicio',
+            perfil_snapshot VARCHAR(100),
+            iniciado_em TIMESTAMP NOT NULL DEFAULT NOW(),
+            expira_em TIMESTAMP NOT NULL DEFAULT NOW() + INTERVAL '1 hour',
+            encerrado_em TIMESTAMP,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW())""",
+        # ── 012: eventos ──────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS eventos (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT NOT NULL REFERENCES lojas(id),
+            criado_por_usuario_id BIGINT REFERENCES usuarios(id),
+            contrato_id BIGINT REFERENCES contratos(id),
+            templo_id BIGINT REFERENCES recursos(id),
+            titulo VARCHAR(200) NOT NULL,
+            descricao TEXT,
+            tipo VARCHAR(30) NOT NULL DEFAULT 'evento',
+            status VARCHAR(30) NOT NULL DEFAULT 'pendente',
+            data_evento DATE NOT NULL DEFAULT CURRENT_DATE,
+            hora_inicio TIME NOT NULL DEFAULT '08:00',
+            hora_fim TIME NOT NULL DEFAULT '10:00',
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
+        # ── 013: caso_mensagens ───────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS caso_mensagens (
+            id BIGSERIAL PRIMARY KEY,
+            caso_id BIGINT NOT NULL REFERENCES casos_operacionais(id),
+            mensagem_id BIGINT NOT NULL REFERENCES mensagens(id),
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            UNIQUE (caso_id, mensagem_id),
+            UNIQUE (mensagem_id))""",
+        # ── 014: reembolsos ───────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS reembolsos (
+            id BIGSERIAL PRIMARY KEY,
+            caso_id BIGINT NOT NULL REFERENCES casos_operacionais(id),
+            loja_id BIGINT NOT NULL REFERENCES lojas(id),
+            irmao_id BIGINT REFERENCES irmaos(id),
+            aprovado_por_usuario_id BIGINT REFERENCES usuarios(id),
+            categoria VARCHAR(50) NOT NULL DEFAULT 'outros',
+            valor_solicitado NUMERIC(12,2) NOT NULL DEFAULT 0,
+            valor_aprovado NUMERIC(12,2),
+            status VARCHAR(30) NOT NULL DEFAULT 'pendente',
+            data_pagamento DATE,
+            observacao_financeiro TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
+        # ── 016: colunas em irmaos e usuarios ────────────────────────────────
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS cim VARCHAR(30)",
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS data_nascimento DATE",
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS nome_esposa VARCHAR(150)",
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS data_nascimento_esposa DATE",
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS potencia VARCHAR(100)",
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS confirmacao_token TEXT",
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email_confirmado BOOLEAN NOT NULL DEFAULT TRUE",
+        # ── 016: irmaos_filhos, regras_mensalidade ────────────────────────────
+        """CREATE TABLE IF NOT EXISTS irmaos_filhos (
+            id BIGSERIAL PRIMARY KEY,
+            irmao_id BIGINT NOT NULL REFERENCES irmaos(id) ON DELETE CASCADE,
+            nome VARCHAR(150) NOT NULL,
+            data_nascimento DATE,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS regras_mensalidade (
+            id BIGSERIAL PRIMARY KEY,
+            irmao_id BIGINT NOT NULL REFERENCES irmaos(id) ON DELETE CASCADE,
+            categoria VARCHAR(30) NOT NULL DEFAULT 'regular',
+            valor NUMERIC(10,2) NOT NULL DEFAULT 0,
+            vigencia_inicio DATE NOT NULL DEFAULT CURRENT_DATE,
+            vigencia_fim DATE,
+            observacao TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW())""",
+        # ── 017: boletos_processados ──────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS boletos_processados (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT NOT NULL REFERENCES lojas(id),
+            irmao_id BIGINT REFERENCES irmaos(id),
+            tamanho_bytes INTEGER,
+            status VARCHAR(30) NOT NULL DEFAULT 'enviado',
+            erro TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW())""",
+        # ── 019: cargo_permissoes, comissoes, comissoes_membros ───────────────
+        """CREATE TABLE IF NOT EXISTS cargo_permissoes (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            cargo VARCHAR(50) NOT NULL,
+            recurso VARCHAR(50) NOT NULL,
+            acoes TEXT[] NOT NULL DEFAULT '{}',
+            UNIQUE (loja_id, cargo, recurso))""",
+        """CREATE TABLE IF NOT EXISTS comissoes (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            nome VARCHAR(100) NOT NULL,
+            descricao TEXT,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS comissoes_membros (
+            id SERIAL PRIMARY KEY,
+            comissao_id INT NOT NULL REFERENCES comissoes(id) ON DELETE CASCADE,
+            irmao_id INT NOT NULL REFERENCES irmaos(id) ON DELETE CASCADE,
+            funcao VARCHAR(100),
+            data_inicio DATE,
+            data_fim DATE,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            UNIQUE (comissao_id, irmao_id))""",
+        # ── 022: irmaos.usuario_id ────────────────────────────────────────────
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS usuario_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL",
+        # ── 023: repositorio_arquivos.conteudo ────────────────────────────────
         "ALTER TABLE repositorio_arquivos ADD COLUMN IF NOT EXISTS conteudo BYTEA",
-        # migration 024 – tabelas novas
+        # ── 024: categorias_mensalidade, inventario_loja, notificacoes_inbox ──
         """CREATE TABLE IF NOT EXISTS categorias_mensalidade (
             id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
             nome TEXT NOT NULL, descricao TEXT,
@@ -113,21 +336,21 @@ def _ensure_schema(db) -> None:
             usuario_id INT NOT NULL, titulo TEXT NOT NULL,
             mensagem TEXT, lido BOOLEAN NOT NULL DEFAULT FALSE,
             criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
-        # migration 025
+        # ── 025: irmaos.cargo_loja ────────────────────────────────────────────
         "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS cargo_loja TEXT",
-        # migration 026 – bytes para arquivos de compras
+        # ── 026: compras_arquivos.conteudo ────────────────────────────────────
         "ALTER TABLE compras_arquivos ADD COLUMN IF NOT EXISTS conteudo BYTEA",
-        # novos cargos (023)
+        # ── cargos extras ─────────────────────────────────────────────────────
         """INSERT INTO cargos (nome, nivel_hierarquico) VALUES
            ('mestre_banquete', 55), ('obreiro', 20), ('irmao_loja', 15)
            ON CONFLICT (nome) DO NOTHING""",
     ]
-    try:
-        with db.transaction() as tx:
-            for s in stmts:
+    for s in stmts:
+        try:
+            with db.transaction() as tx:
                 tx.execute(s, [])
-    except Exception as exc:
-        print(f"[schema] aviso: {exc}")
+        except Exception as exc:
+            print(f"[schema] aviso ({s[:60]!r}): {exc}")
 
 
 @asynccontextmanager
