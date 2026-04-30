@@ -515,13 +515,17 @@ async def lifespan(app_: FastAPI):
 
     db = get_database()
 
-    # Abre o pool e roda migrações em thread separada para não bloquear o event loop
-    try:
+    async def _init_db_background():
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, db.open)
-        await loop.run_in_executor(None, _ensure_schema, db)
-    except Exception as exc:
-        print(f"[startup] aviso na inicialização do DB: {exc}")
+        try:
+            await loop.run_in_executor(None, db.open)
+            await loop.run_in_executor(None, _ensure_schema, db)
+            print("[startup] banco inicializado com sucesso")
+        except Exception as exc:
+            print(f"[startup] erro DB: {exc}")
+
+    # Inicia DB em segundo plano — app responde imediatamente
+    asyncio.ensure_future(_init_db_background())
 
     # Inicia o scheduler de tarefas diárias
     try:
@@ -650,6 +654,41 @@ class GenerateBillingInput(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok", "versao": "agenda-local-v3"}
+
+
+@app.get("/health/db")
+def health_db(db=Depends(get_database)):
+    try:
+        with db.transaction() as tx:
+            tx.fetch_one("SELECT 1 AS ok", [])
+        return {"status": "ok", "db": "conectado"}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Banco indisponível: {exc}")
+
+
+class SetupAdminInput(BaseModel):
+    nome: str
+    email: str
+    senha: str
+
+
+@app.post("/setup/admin", status_code=201)
+def setup_admin(payload: SetupAdminInput, db=Depends(get_database)):
+    """Cria o primeiro administrador. Bloqueado se já existir qualquer usuário."""
+    with db.transaction() as tx:
+        total = tx.fetch_one("SELECT COUNT(*) AS n FROM usuarios WHERE deleted_at IS NULL", [])
+        if total and total["n"] > 0:
+            raise HTTPException(status_code=403, detail="Sistema já inicializado. Use o login normal.")
+        cargo = tx.fetch_one("SELECT id FROM cargos WHERE nome = 'admin_principal'", [])
+        if not cargo:
+            raise HTTPException(status_code=503, detail="Banco ainda inicializando. Aguarde 30s e tente novamente.")
+        from backend_services.auth_service import AuthService as _Auth
+        tx.execute(
+            """INSERT INTO usuarios (nome, email, senha_hash, cargo_id, ativo, email_confirmado)
+               VALUES (%s, %s, %s, %s, TRUE, TRUE)""",
+            [payload.nome, payload.email, _Auth.hash_password(payload.senha), cargo["id"]],
+        )
+    return {"status": "admin_criado", "email": payload.email}
 
 
 @app.post("/auth/login")

@@ -345,16 +345,27 @@ function apiBase() {
 }
 
 async function api(method, path, body) {
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 35000);
   const opts = {
     method,
     headers: { 'Content-Type': 'application/json' },
+    signal: controller.signal,
   };
   if (state.token) opts.headers['Authorization'] = 'Basic ' + state.token;
   if (body)        opts.body = JSON.stringify(body);
-  const res = await fetch(apiBase() + path, opts);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.detail || 'Erro na API'), { data });
-  return data;
+  try {
+    const res = await fetch(apiBase() + path, opts);
+    clearTimeout(tid);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.detail || `Erro ${res.status}`), { data });
+    return data;
+  } catch (e) {
+    clearTimeout(tid);
+    if (e.name === 'AbortError')
+      throw new Error('Servidor demorou para responder. O sistema pode estar iniciando — aguarde 30s e tente novamente.');
+    throw e;
+  }
 }
 
 async function downloadComAuth(url, nome) {
@@ -445,11 +456,13 @@ async function login() {
   const email = document.getElementById('email').value.trim();
   const pass  = document.getElementById('password').value;
   const msg   = document.getElementById('loginMsg');
+  const btn   = document.getElementById('loginBtn');
 
   if (!email || !pass) { msg.textContent = 'Preencha e-mail e senha.'; return; }
 
   state.token = btoa(email + ':' + pass);
   msg.textContent = 'Conectando…';
+  btn.disabled = true;
 
   try {
     const me = await api('GET', '/auth/me');
@@ -458,7 +471,11 @@ async function login() {
     msg.textContent = '';
   } catch (e) {
     state.token = null;
+    msg.className = 'sb-msg';
+    msg.style.color = '#ef4444';
     msg.textContent = e.message || 'Credenciais inválidas.';
+  } finally {
+    btn.disabled = false;
   }
 }
 
