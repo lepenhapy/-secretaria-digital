@@ -516,7 +516,7 @@ async def lifespan(app_: FastAPI):
     db = get_database()
 
     async def _init_db_background():
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(None, db.open)
             await loop.run_in_executor(None, _ensure_schema, db)
@@ -525,7 +525,7 @@ async def lifespan(app_: FastAPI):
             print(f"[startup] erro DB: {exc}")
 
     # Inicia DB em segundo plano — app responde imediatamente
-    asyncio.ensure_future(_init_db_background())
+    asyncio.create_task(_init_db_background())
 
     # Inicia o scheduler de tarefas diárias
     try:
