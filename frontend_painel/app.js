@@ -327,21 +327,21 @@ const FUNCIONALIDADES = {
     desc: 'Gerencie o inventário físico da loja: itens, quantidades, condições e necessidades de compra.',
     quem: 'arquiteto, almoxarife',
     cor: '#475569',
-    customOnClick: 'abrirModulo("inventario")',
+    customOnClick: "abrirModulo('inventario')",
   },
   tarefas: {
     icone: '✅', titulo: 'Tarefas',
     desc: 'Crie, atribua e acompanhe tarefas da loja com prioridade, vencimento e status em tempo real.',
     quem: 'admin_principal, veneravel_mestre, secretario, financeiro, chanceler, primeiro_vigilante, segundo_vigilante',
     cor: '#16a34a',
-    customOnClick: 'abrirModulo("tarefas")',
+    customOnClick: "abrirModulo('tarefas')",
   },
   ver_contratos: {
     icone: '📄', titulo: 'Ver Contratos',
     desc: 'Lista todos os contratos da loja com vigência, situação financeira e acesso ao arquivo para leitura.',
     quem: 'admin_principal, veneravel_mestre, secretario',
     cor: '#0369a1',
-    customOnClick: 'abrirModulo("ver_contratos")',
+    customOnClick: "abrirModulo('ver_contratos')",
   },
 };
 
@@ -3658,9 +3658,34 @@ async function verArquivoContrato(url) {
   } catch(e) { alert('Erro ao abrir arquivo: ' + e.message); }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  DARK / LIGHT MODE
+// ═══════════════════════════════════════════════════════════
+
+function toggleDarkMode() {
+  const html = document.documentElement;
+  const isDark = html.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('sd-theme', next);
+  _syncThemeBtn();
+}
+
+function _syncThemeBtn() {
+  const btn = document.getElementById('themeToggle');
+  if (!btn) return;
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  btn.textContent = isDark ? '☀️  Modo Claro' : '🌙  Modo Escuro';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   renderSidebar();
   renderHome();
+
+  // Aplicar tema salvo e sincronizar botão
+  const savedTheme = localStorage.getItem('sd-theme') || 'light';
+  document.documentElement.setAttribute('data-theme', savedTheme);
+  _syncThemeBtn();
 
   // Estado inicial: mostrar símbolo, esconder tudo mais
   mostrarView('preLoginView');

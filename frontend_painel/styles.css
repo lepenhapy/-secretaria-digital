@@ -867,3 +867,87 @@ body {
   background: #fef2f2; color: #ef4444; border: 1px solid #fecaca;
 }
 .func-btn.danger:hover { background: #fee2e2; }
+
+/* ═══════════════════════════════════════════
+   DARK MODE
+═══════════════════════════════════════════ */
+[data-theme="dark"] {
+  --bg:        #0f1117;
+  --white:     #1c2233;
+  --text:      #e2e8f0;
+  --muted:     #94a3b8;
+  --border:    #2d3748;
+  --shadow:    0 1px 4px rgba(0,0,0,0.35);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.5);
+  --sb-bg:     #0d1320;
+  --sb-hover:  #1a2436;
+}
+
+/* Superfícies com background fixo em #fff / #f8fafc / #f1f5f9 */
+[data-theme="dark"] .home-cargo-card,
+[data-theme="dark"] .func-card,
+[data-theme="dark"] .resp-card,
+[data-theme="dark"] .irmao-card,
+[data-theme="dark"] .form-card,
+[data-theme="dark"] .mensalidade-info,
+[data-theme="dark"] .modal-box,
+[data-theme="dark"] .compra-card,
+[data-theme="dark"] .rateio-item,
+[data-theme="dark"] .perm-card,
+[data-theme="dark"] .relat-card,
+[data-theme="dark"] .relat-chart-wrap,
+[data-theme="dark"] .wpp-status-card,
+[data-theme="dark"] .wpp-qr-wrap,
+[data-theme="dark"] .agenda-grid-wrap,
+[data-theme="dark"] .agenda-dia-detalhe,
+[data-theme="dark"] .cargo-header { background: var(--white); }
+
+[data-theme="dark"] .relat-table          { background: var(--white); color: var(--text); }
+[data-theme="dark"] .relat-table th       { background: #242d3e; color: var(--muted); }
+[data-theme="dark"] .relat-table td       { border-bottom-color: var(--border); }
+
+[data-theme="dark"] .form-input,
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .modal-input          { background: #242d3e; color: var(--text); border-color: var(--border); }
+[data-theme="dark"] .form-input:focus,
+[data-theme="dark"] .modal-input:focus    { background: #1c2233; }
+
+[data-theme="dark"] .modal-result         { background: #242d3e; color: var(--muted); }
+[data-theme="dark"] .func-btn.neutral,
+[data-theme="dark"] .func-btn.locked      { background: #242d3e; color: var(--text); border-color: var(--border); }
+[data-theme="dark"] .badge-locked         { background: #242d3e; border-color: var(--border); color: var(--muted); }
+[data-theme="dark"] .compra-obs           { background: #242d3e; }
+[data-theme="dark"] .wpp-info-box         { background: #242d3e; border-color: var(--border); }
+[data-theme="dark"] .agenda-dias-semana   { background: #242d3e; }
+[data-theme="dark"] .agenda-cel:hover     { background: #1e2a3b; }
+[data-theme="dark"] .agenda-cel.vazio     { background: #141822; }
+[data-theme="dark"] .agenda-cel.selecionado { background: #1a2744; }
+[data-theme="dark"] .agenda-evento-item   { background: #242d3e; }
+[data-theme="dark"] .relat-tab            { background: var(--white); border-color: var(--border); }
+[data-theme="dark"] .relat-tab.active     { background: #1a2744; }
+[data-theme="dark"] .perm-check           { background: #242d3e; border-color: var(--border); }
+[data-theme="dark"] .perm-check:has(input:checked) { background: #1a2744; }
+[data-theme="dark"] .btn-neutral          { background: #242d3e; }
+[data-theme="dark"] .cargo-irmao-row      { background: var(--white); }
+[data-theme="dark"] .ci-select            { background: #242d3e; color: var(--text); border-color: var(--border); }
+[data-theme="dark"] .filtros-row select,
+[data-theme="dark"] .filtros-row input[type=date],
+[data-theme="dark"] .relat-filtros input[type=date] { background: #242d3e; color: var(--text); border-color: var(--border); }
+[data-theme="dark"] .cat-card.regular  { background: #1a2744; border-color: #1e40af; }
+[data-theme="dark"] .cat-card.idoso    { background: #142d1a; border-color: #166534; }
+[data-theme="dark"] .cat-card.potencia { background: #1e1a33; border-color: #5b21b6; }
+[data-theme="dark"] .cat-card.especial { background: #2a2009; border-color: #92400e; }
+[data-theme="dark"] .prelogin-label    { color: var(--text); }
+[data-theme="dark"] .home-badge { background: rgba(37,99,235,0.22); }
+[data-theme="dark"] .nivel-tag  { background: #242d3e; border-color: var(--border); }
+
+/* Botão de alternância de tema */
+.btn-theme-toggle {
+  width: 100%; padding: 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--sb-text2); border-radius: var(--radius-sm);
+  font-size: 13px; cursor: pointer; margin-bottom: 8px;
+  transition: background 0.15s;
+}
+.btn-theme-toggle:hover { background: rgba(255,255,255,0.12); }

@@ -4,7 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Secretaria Digital</title>
-  <link rel="stylesheet" href="styles.css?v=14" />
+  <link rel="stylesheet" href="styles.css?v=15" />
+  <script>
+    (function(){var t=localStorage.getItem('sd-theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');}())
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -63,6 +66,7 @@
 
     <!-- Rodapé -->
     <div class="sidebar-footer">
+      <button id="themeToggle" onclick="toggleDarkMode()" class="btn-theme-toggle">🌙  Modo Escuro</button>
       <button onclick="window.print()" class="btn-print">⎙ Imprimir esta página</button>
     </div>
 
@@ -252,6 +256,6 @@
   </div>
 </div>
 
-<script src="app.js?v=16"></script>
+<script src="app.js?v=17"></script>
 </body>
 </html>
