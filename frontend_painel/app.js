@@ -497,7 +497,7 @@ function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
    'relatoriosView','permissoesView','comissoesView','repositorioView',
    'agendaView','irmaoDetalheView','usuariosView','inventarioView','whatsappView',
-   'contratosView','tarefasView'].forEach(v => {
+   'contratosView','tarefasView','lojasView','complexoView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -565,6 +565,14 @@ function renderSidebar() {
     <div class="sidebar-nav-module" id="nav-repositorio" onclick="abrirModulo('repositorio')">
       <span style="font-size:15px">🗄️</span><span>Repositório</span>
     </div>
+    ${state.usuario?.cargo === 'admin_principal' ? `
+    <div class="sidebar-nav-module" id="nav-lojas" onclick="abrirModulo('lojas')">
+      <span style="font-size:15px">🏛️</span><span>Lojas & Complexos</span>
+    </div>` : ''}
+    ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo) || state.usuario?.loja_tipo === 'complexo' ? `
+    <div class="sidebar-nav-module" id="nav-complexo_dash" onclick="abrirModulo('complexo_dash')">
+      <span style="font-size:15px">📊</span><span>Dashboard Complexo</span>
+    </div>` : ''}
     ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo) ? `
     <div class="sidebar-nav-module" id="nav-permissoes" onclick="abrirModulo('permissoes')">
       <span style="font-size:15px">🔐</span><span>Permissões</span>
@@ -624,6 +632,8 @@ function abrirModulo(id) {
     whatsapp:       () => { mostrarView('whatsappView');   renderWhatsAppView(); },
     ver_contratos:  () => { mostrarView('contratosView');  renderContratosView(); },
     tarefas:        () => { mostrarView('tarefasView');    renderTarefasView(); },
+    lojas:          () => { mostrarView('lojasView');      renderLojasView(); },
+    complexo_dash:  () => { mostrarView('complexoView');   renderComplexoDashView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -2814,40 +2824,57 @@ async function aprovarReembolsoItem(id, decisao) {
 
 async function renderUsuariosView() {
   const el = document.getElementById('usuariosView');
+  const isAdmin = state.usuario?.cargo === 'admin_principal';
   el.innerHTML = `
     <div class="view-header">
-      <h1>🔑 Usuários</h1>
+      <h1>Usuários</h1>
     </div>
-    <div id="usuariosLista"><div style="color:#94a3b8;padding:20px">Carregando…</div></div>
-  `;
+    <div id="usuariosLista"><div class="loading">Carregando…</div></div>`;
   await carregarUsuarios();
 }
 
 async function carregarUsuarios() {
-  const loja = state.usuario?.loja_id || 1;
+  const isAdmin = state.usuario?.cargo === 'admin_principal';
+  const url = isAdmin ? '/usuarios' : `/usuarios?loja_id=${state.usuario?.loja_id || 0}`;
   try {
-    const lista = await api('GET', `/usuarios?loja_id=${loja}`);
+    const [lista, lojas] = await Promise.all([
+      api('GET', url),
+      isAdmin ? api('GET', '/lojas') : Promise.resolve([]),
+    ]);
+    const lojaMap = Object.fromEntries(lojas.map(l => [l.id, l]));
     const el = document.getElementById('usuariosLista');
-    if (!lista.length) { el.innerHTML = '<p style="color:#94a3b8">Nenhum usuário cadastrado.</p>'; return; }
-    el.innerHTML = lista.map(u => `
+    if (!lista.length) { el.innerHTML = '<p class="empty-msg">Nenhum usuário cadastrado.</p>'; return; }
+    el.innerHTML = lista.map(u => {
+      const lj = lojaMap[u.loja_id];
+      const lojaInfo = lj
+        ? `<span style="background:var(--border);border-radius:10px;padding:1px 8px;font-size:11px">
+             🏛 ${lj.nome}${lj.numero?' nº'+lj.numero:''}</span>`
+        : `<span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:1px 8px;font-size:11px">
+             ⚠ Sem loja</span>`;
+      return `
       <div class="rateio-item" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div>
-          <div style="font-weight:600">${u.nome}</div>
-          <div style="font-size:12px;color:#64748b">${u.email} · ${(u.cargo||'').replace(/_/g,' ')}</div>
-          <div style="font-size:11px;margin-top:2px">
+          <div style="font-weight:700;font-size:14px">${u.nome}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${u.email} · ${(u.cargo||'').replace(/_/g,' ')}</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">
+            ${lojaInfo}
             ${u.ativo
-              ? '<span style="color:#16a34a">● Ativo</span>'
-              : '<span style="color:#dc2626">● Inativo / aguardando confirmação</span>'}
+              ? `<span style="font-size:11px;color:#16a34a">● Ativo</span>`
+              : `<span style="font-size:11px;color:#dc2626">● Inativo</span>`}
           </div>
         </div>
-        <div style="display:flex;gap:8px">
-          ${!u.ativo ? `<button class="func-btn primary" style="font-size:12px;padding:4px 12px" onclick="ativarUsuario(${u.id})">✓ Ativar</button>` : ''}
-          <button class="func-btn danger" style="font-size:12px;padding:4px 12px" onclick="excluirUsuario(${u.id}, '${(u.nome||'').replace(/'/g,"\\'")}')">🗑 Excluir</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${isAdmin ? `<button class="func-btn neutral" style="font-size:12px;padding:4px 12px"
+            onclick="vincularUsuarioLoja(${u.id})">🏛 Vincular Loja</button>` : ''}
+          ${!u.ativo ? `<button class="func-btn primary" style="font-size:12px;padding:4px 12px"
+            onclick="ativarUsuario(${u.id})">✓ Ativar</button>` : ''}
+          <button class="func-btn danger" style="font-size:12px;padding:4px 12px"
+            onclick="excluirUsuario(${u.id},'${(u.nome||'').replace(/'/g,'')}')">🗑 Excluir</button>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   } catch(e) {
-    document.getElementById('usuariosLista').innerHTML = `<p style="color:#dc2626">${e.message}</p>`;
+    document.getElementById('usuariosLista').innerHTML = `<p class="error-msg">${e.message}</p>`;
   }
 }
 
@@ -3573,6 +3600,392 @@ async function confirmarDeletarTarefa(id) {
   if (!confirm('Excluir esta tarefa?')) return;
   await api('DELETE', `/tarefas/${id}`);
   renderTarefasView();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MÓDULO — LOJAS & COMPLEXOS
+// ═══════════════════════════════════════════════════════════
+
+let _lojasFiltro  = 'todos';
+const _lojasCache = {};
+
+async function renderLojasView() {
+  const view = document.getElementById('lojasView');
+  view.innerHTML = `<div class="loading">Carregando lojas…</div>`;
+  try {
+    const lista = await api('GET', '/lojas');
+    lista.forEach(l => { _lojasCache[l.id] = l; });
+    const isAdmin = state.usuario?.cargo === 'admin_principal';
+    const complexos = lista.filter(l => l.tipo === 'complexo');
+    const filhas    = lista.filter(l => l.tipo === 'loja');
+    const filtradas = _lojasFiltro === 'complexo' ? complexos
+                    : _lojasFiltro === 'loja'     ? filhas
+                    : lista;
+
+    view.innerHTML = `
+      <div class="view-header">
+        <h1>Lojas & Complexos</h1>
+        ${isAdmin ? `<button class="btn-primary" onclick="abrirModalLoja(null)">+ Nova Loja</button>` : ''}
+      </div>
+
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:22px">
+        ${_ljaStatCard('🏛️', complexos.length, 'Complexos')}
+        ${_ljaStatCard('🕍', filhas.length, 'Lojas filhas')}
+        ${_ljaStatCard('👥', lista.reduce((s,l) => s + (+l.total_irmaos||0), 0), 'Irmãos cadastrados')}
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap">
+        ${['todos','complexo','loja'].map(f => `
+          <button onclick="_lojasFiltro='${f}';renderLojasView()"
+            class="func-btn ${_lojasFiltro===f?'primary':'neutral'}">
+            ${{ todos:'Todos', complexo:'Complexos', loja:'Lojas Filhas' }[f]}
+          </button>`).join('')}
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:16px">
+        ${filtradas.length ? filtradas.map(l => _ljaCard(l, isAdmin)).join('') :
+          '<p class="empty-msg">Nenhuma loja encontrada.</p>'}
+      </div>
+
+      <div id="modalLojaOverlay" class="modal-overlay" onclick="fecharModalLoja()" style="display:none">
+        <div class="modal-box" onclick="event.stopPropagation()" style="max-width:560px"></div>
+      </div>`;
+  } catch(e) {
+    view.innerHTML = `<div class="error-msg">Erro: ${e.message}</div>`;
+  }
+}
+
+function _ljaStatCard(icon, val, label) {
+  return `<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;
+    padding:16px 24px;box-shadow:var(--shadow);min-width:120px;text-align:center">
+    <div style="font-size:26px">${icon}</div>
+    <div style="font-size:22px;font-weight:800;color:var(--text);margin:4px 0">${val}</div>
+    <div style="font-size:12px;color:var(--muted)">${label}</div>
+  </div>`;
+}
+
+function _ljaCard(l, isAdmin) {
+  const tipoCor = l.tipo === 'complexo' ? '#7c3aed' : '#0369a1';
+  const stCor   = {ativa:'#16a34a',pendente:'#d97706',inativa:'#64748b',bloqueada:'#dc2626'}[l.status] || '#64748b';
+  return `
+    <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;
+                padding:20px;box-shadow:var(--shadow);border-top:3px solid ${tipoCor}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <span style="background:${tipoCor}18;color:${tipoCor};font-size:11px;font-weight:700;
+                     padding:2px 10px;border-radius:20px;text-transform:uppercase">
+          ${l.tipo === 'complexo' ? '🏛 Complexo' : '🕍 Loja'}
+        </span>
+        <span style="background:${stCor}18;color:${stCor};font-size:11px;font-weight:700;
+                     padding:2px 10px;border-radius:20px;text-transform:uppercase">${l.status}</span>
+      </div>
+      <div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:4px">
+        ${l.nome}${l.numero ? ` <span style="color:var(--muted);font-size:13px;font-weight:400">nº ${l.numero}</span>` : ''}
+      </div>
+      ${l.potencia     ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">⚡ ${l.potencia}</div>` : ''}
+      ${l.cidade       ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">📍 ${l.cidade}</div>` : ''}
+      ${l.complexo_nome? `<div style="font-size:12px;color:var(--muted);margin-top:2px">↗ ${l.complexo_nome}</div>` : ''}
+      <div style="display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:12px;
+                  border-top:1px solid var(--border);flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--muted);margin-right:auto">👥 ${l.total_irmaos||0} irmãos</span>
+        ${l.tipo==='complexo'?`<button class="func-btn primary" style="font-size:12px;padding:5px 12px"
+          onclick="abrirModulo('complexo_dash')">Dashboard</button>`:''}
+        ${isAdmin?`<button class="func-btn neutral" style="font-size:12px;padding:5px 12px"
+          onclick="abrirModalLoja(${l.id})">Editar</button>`:''}
+        ${isAdmin?`<button class="func-btn danger" style="font-size:12px;padding:5px 12px"
+          onclick="confirmarDeletarLoja(${l.id},'${l.nome.replace(/'/g,'\\u0027')}')">Excluir</button>`:''}
+      </div>
+    </div>`;
+}
+
+async function abrirModalLoja(id) {
+  const overlay = document.getElementById('modalLojaOverlay');
+  if (!overlay) { await renderLojasView(); return abrirModalLoja(id); }
+  const l = id ? _lojasCache[id] : null;
+
+  // Carrega lista de complexos para o dropdown
+  let complexos = [];
+  try { complexos = (await api('GET', '/lojas?tipo=complexo')); } catch(_) {}
+
+  const CARGOS_LOJAS = ['GOE','GLEMT','GOEB','GOB','GONMB','Outra'];
+
+  overlay.querySelector('.modal-box').innerHTML = `
+    <div class="modal-header">
+      <div class="modal-title">${l ? 'Editar Loja' : 'Nova Loja'}</div>
+      <button class="modal-close" onclick="fecharModalLoja()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Nome *</label>
+          <input class="modal-input" id="lj_nome" value="${l?.nome||''}" placeholder="Nome da loja" />
+        </div>
+        <div class="form-group">
+          <label>Número</label>
+          <input class="modal-input" id="lj_num" value="${l?.numero||''}" placeholder="Ex: 36" />
+        </div>
+        <div class="form-group">
+          <label>Tipo *</label>
+          <select class="modal-input" id="lj_tipo" onchange="_ljaToggleComplexo()">
+            <option value="loja"    ${(!l||l.tipo==='loja')   ?'selected':''}>Loja</option>
+            <option value="complexo"${l?.tipo==='complexo'?'selected':''}>Complexo</option>
+          </select>
+        </div>
+        <div class="form-group" id="lj_complexo_wrap" style="${(l?.tipo==='complexo')?'display:none':''};grid-column:1/-1">
+          <label>Complexo pai</label>
+          <select class="modal-input" id="lj_complexo_id">
+            <option value="">— Sem complexo —</option>
+            ${complexos.map(c=>`<option value="${c.id}" ${l?.complexo_id===c.id?'selected':''}>${c.nome}${c.numero?' nº'+c.numero:''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select class="modal-input" id="lj_status">
+            ${['ativa','pendente','inativa','bloqueada'].map(s=>`<option value="${s}" ${(l?.status||'ativa')===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Potência</label>
+          <select class="modal-input" id="lj_potencia">
+            <option value="">— Selecione —</option>
+            ${CARGOS_LOJAS.map(p=>`<option value="${p}" ${l?.potencia===p?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Cidade</label>
+          <input class="modal-input" id="lj_cidade" value="${l?.cidade||''}" placeholder="Cidade" />
+        </div>
+        <div class="form-group">
+          <label>Telefone WhatsApp</label>
+          <input class="modal-input" id="lj_wpp" value="${l?.telefone_whatsapp||''}" placeholder="+5511999999999" />
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Endereço</label>
+          <input class="modal-input" id="lj_end" value="${l?.endereco||''}" placeholder="Endereço completo" />
+        </div>
+      </div>
+      <div id="lj_msg" class="modal-result" style="display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="func-btn neutral" onclick="fecharModalLoja()">Cancelar</button>
+      <button class="func-btn primary" onclick="salvarLoja(${id||0})">Salvar</button>
+    </div>`;
+  overlay.style.display = 'flex';
+}
+
+function _ljaToggleComplexo() {
+  const tipo = document.getElementById('lj_tipo')?.value;
+  const wrap = document.getElementById('lj_complexo_wrap');
+  if (wrap) wrap.style.display = tipo === 'complexo' ? 'none' : '';
+}
+
+function fecharModalLoja() {
+  const overlay = document.getElementById('modalLojaOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function salvarLoja(id) {
+  const nome = document.getElementById('lj_nome').value.trim();
+  const msg  = document.getElementById('lj_msg');
+  if (!nome) {
+    msg.style.display='block'; msg.className='modal-result error';
+    msg.textContent='Nome obrigatório.'; return;
+  }
+  const complexo_id = +document.getElementById('lj_complexo_id')?.value || null;
+  const payload = {
+    nome, numero:  document.getElementById('lj_num').value.trim() || null,
+    tipo:          document.getElementById('lj_tipo').value,
+    status:        document.getElementById('lj_status').value,
+    potencia:      document.getElementById('lj_potencia').value || null,
+    cidade:        document.getElementById('lj_cidade').value.trim() || null,
+    telefone_whatsapp: document.getElementById('lj_wpp').value.trim() || null,
+    endereco:      document.getElementById('lj_end').value.trim() || null,
+    complexo_id,
+    limpar_complexo: !complexo_id && !!id,
+  };
+  try {
+    if (id) await api('PUT', `/lojas/${id}`, payload);
+    else    await api('POST', '/lojas', payload);
+    fecharModalLoja();
+    renderLojasView();
+  } catch(e) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message;
+  }
+}
+
+async function confirmarDeletarLoja(id, nome) {
+  if (!confirm(`Excluir a loja "${nome}"? Esta ação não pode ser desfeita.`)) return;
+  try {
+    await api('DELETE', `/lojas/${id}`);
+    renderLojasView();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+// ── Dashboard do Complexo ─────────────────────────────────────────────────
+
+async function renderComplexoDashView() {
+  const view = document.getElementById('complexoView');
+  view.innerHTML = `<div class="loading">Carregando dashboard…</div>`;
+  try {
+    const d = await api('GET', '/complexo/dashboard');
+    if (!d.complexo) {
+      view.innerHTML = `
+        <div class="view-header"><h1>Dashboard do Complexo</h1></div>
+        <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;
+                    padding:32px;text-align:center;color:var(--muted)">
+          <div style="font-size:40px;margin-bottom:12px">🏛️</div>
+          <div style="font-weight:700;font-size:16px;margin-bottom:8px">Nenhum complexo cadastrado</div>
+          <p>Acesse <strong>Lojas & Complexos</strong> e crie um complexo primeiro.</p>
+          <button class="btn-primary" style="margin-top:16px" onclick="abrirModulo('lojas')">Ir para Lojas</button>
+        </div>`;
+      return;
+    }
+    const { complexo, lojas, proximas_sessoes: prox, stats } = d;
+    const lojasFilhas = lojas.filter(l => l.id !== complexo.id);
+
+    view.innerHTML = `
+      <div class="view-header">
+        <div>
+          <h1>${complexo.nome}${complexo.numero?' <span style="font-size:14px;font-weight:400;color:var(--muted)">nº '+complexo.numero+'</span>':''}</h1>
+          <div style="font-size:13px;color:var(--muted);margin-top:2px">Dashboard do Complexo</div>
+        </div>
+        <button class="btn-primary" onclick="abrirModulo('lojas')">Gerenciar Lojas</button>
+      </div>
+
+      <!-- Stats -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-bottom:24px">
+        ${_dashCard('🕍', stats.total_lojas_filhas, 'Lojas no complexo', '#0369a1')}
+        ${_dashCard('👥', stats.total_irmaos, 'Irmãos no quadro', '#7c3aed')}
+        ${_dashCard('📅', stats.proximas_sessoes, 'Próximos eventos (60d)', '#059669')}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+
+        <!-- Lojas filhas -->
+        <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)">
+          <div style="padding:16px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">
+            🕍 Lojas no complexo
+          </div>
+          ${lojasFilhas.length ? `
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:var(--bg)">
+              <th style="padding:8px 16px;text-align:left;font-weight:600;color:var(--muted)">Loja</th>
+              <th style="padding:8px 16px;text-align:center;font-weight:600;color:var(--muted)">Irmãos</th>
+              <th style="padding:8px 16px;text-align:center;font-weight:600;color:var(--muted)">Status</th>
+            </tr></thead>
+            <tbody>
+              ${lojasFilhas.map(l => {
+                const stCor = {ativa:'#16a34a',pendente:'#d97706',inativa:'#64748b',bloqueada:'#dc2626'}[l.status]||'#64748b';
+                return `<tr style="border-top:1px solid var(--border)">
+                  <td style="padding:10px 16px;font-weight:600">
+                    ${l.nome}${l.numero?` <span style="color:var(--muted);font-weight:400">nº${l.numero}</span>`:''}
+                  </td>
+                  <td style="padding:10px 16px;text-align:center">${l.total_irmaos||0}</td>
+                  <td style="padding:10px 16px;text-align:center">
+                    <span style="background:${stCor}18;color:${stCor};font-size:11px;font-weight:700;
+                                 padding:2px 8px;border-radius:20px">${l.status}</span>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>` :
+          `<div class="empty-msg">Nenhuma loja filha cadastrada ainda.</div>`}
+        </div>
+
+        <!-- Próximos eventos -->
+        <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)">
+          <div style="padding:16px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">
+            📅 Próximos eventos (todas as lojas)
+          </div>
+          ${prox.length ? `
+          <div style="max-height:360px;overflow-y:auto">
+            ${prox.map(e => `
+              <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+                <div style="font-weight:600;font-size:13px">${e.titulo}</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">
+                  📅 ${e.data}${e.hora_inicio?' às '+e.hora_inicio:''} &middot;
+                  ${e.loja_nome}${e.loja_numero?' nº'+e.loja_numero:''}
+                </div>
+              </div>`).join('')}
+          </div>` :
+          `<div class="empty-msg">Nenhum evento nos próximos 60 dias.</div>`}
+        </div>
+      </div>`;
+  } catch(e) {
+    view.innerHTML = `<div class="error-msg">Erro ao carregar dashboard: ${e.message}</div>`;
+  }
+}
+
+function _dashCard(icon, val, label, cor) {
+  return `<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;
+    padding:18px;box-shadow:var(--shadow);border-top:3px solid ${cor}">
+    <div style="font-size:24px">${icon}</div>
+    <div style="font-size:26px;font-weight:800;color:${cor};margin:6px 0">${val}</div>
+    <div style="font-size:12px;color:var(--muted)">${label}</div>
+  </div>`;
+}
+
+// ── Vincular usuário a loja (chamado de renderUsuariosView) ───────────────
+
+async function vincularUsuarioLoja(usuarioId) {
+  try {
+    const lojas = await api('GET', '/lojas');
+    const CARGOS_SISTEMA = [
+      {id:'admin_principal',     label:'Administrador Principal'},
+      {id:'veneravel_mestre',    label:'Venerável Mestre'},
+      {id:'primeiro_vigilante',  label:'1º Vigilante'},
+      {id:'segundo_vigilante',   label:'2º Vigilante'},
+      {id:'secretario',          label:'Secretário'},
+      {id:'financeiro',          label:'Tesoureiro'},
+      {id:'chanceler',           label:'Chanceler'},
+      {id:'arquiteto',           label:'Arquiteto'},
+      {id:'almoxarife',          label:'Almoxarife'},
+      {id:'mestre_banquete',     label:'Mestre de Banquete'},
+      {id:'irmao_operacional',   label:'Irmão Operacional'},
+    ];
+
+    const modal  = document.getElementById('modalOverlay');
+    const title  = document.getElementById('modalTitle');
+    const body   = document.getElementById('modalBody');
+    const footer = document.getElementById('modalFooter');
+
+    title.textContent = 'Vincular Loja & Cargo';
+    body.innerHTML = `
+      <div class="form-group">
+        <label>Loja</label>
+        <select class="modal-input" id="vl_loja">
+          <option value="0">— Sem loja —</option>
+          ${lojas.map(l=>`<option value="${l.id}">${l.nome}${l.numero?' nº'+l.numero:''} (${l.tipo})</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Cargo</label>
+        <select class="modal-input" id="vl_cargo">
+          <option value="">— Manter atual —</option>
+          ${CARGOS_SISTEMA.map(c=>`<option value="${c.id}">${c.label}</option>`).join('')}
+        </select>
+      </div>
+      <div id="vl_msg" class="modal-result" style="display:none"></div>`;
+    footer.innerHTML = `
+      <button class="func-btn neutral" onclick="fecharModal()">Cancelar</button>
+      <button class="func-btn primary" onclick="_salvarVinculo(${usuarioId})">Salvar</button>`;
+    modal.classList.add('open');
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function _salvarVinculo(usuarioId) {
+  const loja_id = +document.getElementById('vl_loja').value;
+  const cargo   =  document.getElementById('vl_cargo').value;
+  const msg     =  document.getElementById('vl_msg');
+  const payload = {};
+  if (loja_id >= 0) payload.loja_id = loja_id || null;
+  if (cargo)        payload.cargo   = cargo;
+  try {
+    await api('PUT', `/usuarios/${usuarioId}/loja`, payload);
+    fecharModal();
+    renderUsuariosView();
+  } catch(e) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

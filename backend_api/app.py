@@ -520,6 +520,13 @@ def _ensure_schema(db) -> None:
         "CREATE INDEX IF NOT EXISTS idx_tarefas_loja_id ON tarefas(loja_id)",
         "CREATE INDEX IF NOT EXISTS idx_tarefas_status ON tarefas(status)",
         "CREATE INDEX IF NOT EXISTS idx_tarefas_vencimento ON tarefas(vencimento)",
+        # ── 028: hierarquia complexo/loja ─────────────────────────────────────
+        "ALTER TABLE lojas ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'loja' CHECK (tipo IN ('loja','complexo'))",
+        "ALTER TABLE lojas ADD COLUMN IF NOT EXISTS complexo_id BIGINT REFERENCES lojas(id)",
+        "ALTER TABLE lojas ADD COLUMN IF NOT EXISTS numero VARCHAR(20)",
+        "ALTER TABLE lojas ADD COLUMN IF NOT EXISTS potencia VARCHAR(100)",
+        "ALTER TABLE lojas ADD COLUMN IF NOT EXISTS endereco TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_lojas_complexo_id ON lojas(complexo_id)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -730,12 +737,268 @@ def me(actor: Actor = Depends(get_current_actor), db=Depends(get_database)):
             "select nome, email from usuarios where id = %s",
             [actor.user_id],
         )
+        loja = None
+        if actor.loja_id:
+            loja = tx.fetch_one(
+                "SELECT nome, tipo, numero, complexo_id FROM lojas WHERE id=%s AND deleted_at IS NULL",
+                (actor.loja_id,),
+            )
     return {
-        "user_id": actor.user_id,
-        "loja_id": actor.loja_id,
-        "cargo": actor.cargo,
-        "nome":  user["nome"]  if user else None,
-        "email": user["email"] if user else None,
+        "user_id":   actor.user_id,
+        "loja_id":   actor.loja_id,
+        "cargo":     actor.cargo,
+        "nome":      user["nome"]  if user else None,
+        "email":     user["email"] if user else None,
+        "loja_nome": loja["nome"]  if loja else None,
+        "loja_tipo": loja["tipo"]  if loja else None,
+        "loja_numero": loja["numero"] if loja else None,
+        "loja_complexo_id": loja["complexo_id"] if loja else None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+#  LOJAS & COMPLEXOS
+# ═══════════════════════════════════════════════════════════
+
+class LojaInput(BaseModel):
+    nome: str
+    numero: Optional[str] = None
+    tipo: str = "loja"
+    complexo_id: Optional[int] = None
+    status: str = "ativa"
+    cidade: Optional[str] = None
+    potencia: Optional[str] = None
+    endereco: Optional[str] = None
+    telefone_whatsapp: Optional[str] = None
+
+class LojaUpdateInput(BaseModel):
+    nome: Optional[str] = None
+    numero: Optional[str] = None
+    tipo: Optional[str] = None
+    complexo_id: Optional[int] = None
+    status: Optional[str] = None
+    cidade: Optional[str] = None
+    potencia: Optional[str] = None
+    endereco: Optional[str] = None
+    telefone_whatsapp: Optional[str] = None
+    limpar_complexo: bool = False  # true → set complexo_id = NULL
+
+class VincularLojaInput(BaseModel):
+    loja_id: Optional[int] = None
+    cargo: Optional[str] = None
+
+
+@app.get("/lojas")
+def listar_lojas(
+    tipo: Optional[str] = Query(None),
+    complexo_id: Optional[int] = Query(None),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        conds, params = ["l.deleted_at IS NULL"], []
+        if actor.cargo != "admin_principal" and actor.loja_id:
+            loja = tx.fetch_one(
+                "SELECT tipo, complexo_id FROM lojas WHERE id=%s AND deleted_at IS NULL",
+                (actor.loja_id,),
+            )
+            if loja:
+                cid = actor.loja_id if loja["tipo"] == "complexo" else loja["complexo_id"]
+                if cid:
+                    conds.append("(l.id=%s OR l.complexo_id=%s)"); params.extend([cid, cid])
+        if tipo:
+            conds.append("l.tipo=%s"); params.append(tipo)
+        if complexo_id:
+            conds.append("(l.id=%s OR l.complexo_id=%s)"); params.extend([complexo_id, complexo_id])
+        where = " AND ".join(conds)
+        rows = tx.fetch_all(
+            f"""SELECT l.id, l.nome, l.numero, l.tipo, l.status, l.cidade,
+                       l.potencia, l.endereco, l.telefone_whatsapp, l.complexo_id,
+                       l.created_at,
+                       lc.nome AS complexo_nome,
+                       COUNT(DISTINCT i.id) AS total_irmaos
+                FROM lojas l
+                LEFT JOIN lojas lc ON lc.id = l.complexo_id
+                LEFT JOIN irmaos i ON i.loja_id = l.id AND i.deleted_at IS NULL
+                WHERE {where}
+                GROUP BY l.id, lc.nome
+                ORDER BY l.tipo DESC, l.nome""",
+            params,
+        )
+    return [dict(r) for r in rows]
+
+
+@app.post("/lojas", status_code=201)
+def criar_loja(
+    payload: LojaInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    if actor.cargo != "admin_principal":
+        raise HTTPException(status_code=403, detail="Apenas admin pode criar lojas.")
+    if payload.tipo not in ("loja", "complexo"):
+        raise HTTPException(status_code=422, detail="tipo deve ser 'loja' ou 'complexo'.")
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            """INSERT INTO lojas
+               (nome, numero, tipo, complexo_id, status, cidade, potencia, endereco, telefone_whatsapp)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (payload.nome, payload.numero, payload.tipo, payload.complexo_id,
+             payload.status, payload.cidade, payload.potencia,
+             payload.endereco, payload.telefone_whatsapp),
+        )
+    if not row:
+        raise HTTPException(status_code=500, detail="Falha ao criar loja.")
+    return {"id": row["id"], "status": "created"}
+
+
+@app.put("/lojas/{loja_id}")
+def atualizar_loja(
+    loja_id: int,
+    payload: LojaUpdateInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    if actor.cargo != "admin_principal":
+        raise HTTPException(status_code=403, detail="Apenas admin pode editar lojas.")
+    with db.transaction() as tx:
+        if not tx.fetch_one("SELECT id FROM lojas WHERE id=%s AND deleted_at IS NULL", (loja_id,)):
+            raise HTTPException(status_code=404, detail="Loja não encontrada.")
+        sets, params = [], []
+        if payload.nome      is not None: sets.append("nome=%s");              params.append(payload.nome)
+        if payload.numero    is not None: sets.append("numero=%s");            params.append(payload.numero)
+        if payload.tipo      is not None: sets.append("tipo=%s");              params.append(payload.tipo)
+        if payload.status    is not None: sets.append("status=%s");            params.append(payload.status)
+        if payload.cidade    is not None: sets.append("cidade=%s");            params.append(payload.cidade)
+        if payload.potencia  is not None: sets.append("potencia=%s");          params.append(payload.potencia)
+        if payload.endereco  is not None: sets.append("endereco=%s");          params.append(payload.endereco)
+        if payload.telefone_whatsapp is not None:
+            sets.append("telefone_whatsapp=%s"); params.append(payload.telefone_whatsapp)
+        if payload.limpar_complexo:
+            sets.append("complexo_id=NULL")
+        elif payload.complexo_id is not None:
+            sets.append("complexo_id=%s"); params.append(payload.complexo_id)
+        if sets:
+            sets.append("updated_at=NOW()")
+            params.append(loja_id)
+            tx.execute(f"UPDATE lojas SET {', '.join(sets)} WHERE id=%s", params)
+    return {"status": "updated"}
+
+
+@app.delete("/lojas/{loja_id}", status_code=204)
+def deletar_loja(
+    loja_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    if actor.cargo != "admin_principal":
+        raise HTTPException(status_code=403, detail="Apenas admin pode excluir lojas.")
+    with db.transaction() as tx:
+        if not tx.fetch_one("SELECT id FROM lojas WHERE id=%s AND deleted_at IS NULL", (loja_id,)):
+            raise HTTPException(status_code=404, detail="Loja não encontrada.")
+        tx.execute("UPDATE lojas SET deleted_at=NOW() WHERE id=%s", (loja_id,))
+
+
+@app.put("/usuarios/{usuario_id}/loja")
+def vincular_usuario_loja(
+    usuario_id: int,
+    payload: VincularLojaInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    if actor.cargo != "admin_principal":
+        raise HTTPException(status_code=403, detail="Apenas admin pode vincular usuários a lojas.")
+    with db.transaction() as tx:
+        if not tx.fetch_one("SELECT id FROM usuarios WHERE id=%s AND deleted_at IS NULL", (usuario_id,)):
+            raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        sets, params = [], []
+        if payload.loja_id is not None:
+            sets.append("loja_id=%s"); params.append(payload.loja_id if payload.loja_id > 0 else None)
+        if payload.cargo:
+            cargo_row = tx.fetch_one("SELECT id FROM cargos WHERE nome=%s", (payload.cargo,))
+            if not cargo_row:
+                raise HTTPException(status_code=404, detail=f"Cargo '{payload.cargo}' não encontrado.")
+            sets.append("cargo_id=%s"); params.append(cargo_row["id"])
+        if sets:
+            sets.append("updated_at=NOW()")
+            params.append(usuario_id)
+            tx.execute(f"UPDATE usuarios SET {', '.join(sets)} WHERE id=%s", params)
+    return {"status": "updated"}
+
+
+@app.get("/complexo/dashboard")
+def complexo_dashboard(
+    cid: Optional[int] = Query(None),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        if cid and actor.cargo == "admin_principal":
+            complexo_id = cid
+        elif actor.loja_id:
+            loja = tx.fetch_one(
+                "SELECT tipo, complexo_id FROM lojas WHERE id=%s AND deleted_at IS NULL",
+                (actor.loja_id,),
+            )
+            if loja and loja["tipo"] == "complexo":
+                complexo_id = actor.loja_id
+            elif loja and loja["complexo_id"]:
+                complexo_id = loja["complexo_id"]
+            else:
+                raise HTTPException(status_code=403, detail="Loja não vinculada a um complexo.")
+        elif actor.cargo == "admin_principal":
+            first = tx.fetch_one(
+                "SELECT id FROM lojas WHERE tipo='complexo' AND deleted_at IS NULL ORDER BY created_at LIMIT 1",
+                [],
+            )
+            complexo_id = first["id"] if first else None
+        else:
+            raise HTTPException(status_code=403, detail="Sem acesso ao dashboard do complexo.")
+
+        if not complexo_id:
+            return {"complexo": None, "lojas": [], "proximas_sessoes": [], "stats": {}}
+
+        lojas = tx.fetch_all(
+            """SELECT l.id, l.nome, l.numero, l.tipo, l.status, l.cidade, l.potencia,
+                      COUNT(DISTINCT i.id) AS total_irmaos
+               FROM lojas l
+               LEFT JOIN irmaos i ON i.loja_id = l.id AND i.deleted_at IS NULL
+               WHERE (l.id=%s OR l.complexo_id=%s) AND l.deleted_at IS NULL
+               GROUP BY l.id ORDER BY l.tipo DESC, l.nome""",
+            (complexo_id, complexo_id),
+        )
+        loja_ids = [l["id"] for l in lojas]
+
+        proximas: list = []
+        if loja_ids:
+            proximas = tx.fetch_all(
+                """SELECT ae.id, ae.titulo, ae.data::text AS data,
+                          ae.hora_inicio::text AS hora_inicio,
+                          l.nome AS loja_nome, l.numero AS loja_numero
+                   FROM agenda_eventos ae
+                   JOIN lojas l ON l.id = ae.loja_id
+                   WHERE ae.loja_id = ANY(%s)
+                     AND ae.data >= CURRENT_DATE
+                     AND ae.data <= CURRENT_DATE + INTERVAL '60 days'
+                   ORDER BY ae.data, ae.hora_inicio LIMIT 30""",
+                (loja_ids,),
+            )
+
+        complexo = tx.fetch_one(
+            "SELECT id, nome, numero, status, cidade FROM lojas WHERE id=%s",
+            (complexo_id,),
+        )
+        stats = {
+            "total_lojas_filhas": len([l for l in lojas if l["id"] != complexo_id]),
+            "total_irmaos": sum(l["total_irmaos"] for l in lojas),
+            "proximas_sessoes": len(proximas),
+        }
+
+    return {
+        "complexo": dict(complexo) if complexo else None,
+        "lojas": [dict(l) for l in lojas],
+        "proximas_sessoes": [dict(s) for s in proximas],
+        "stats": stats,
     }
 
 
