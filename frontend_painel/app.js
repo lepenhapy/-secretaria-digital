@@ -19,7 +19,7 @@ const CARGOS = [
       { icone: '💰', titulo: 'Controle financeiro',      desc: 'Autoriza reembolsos, gera cobranças e acompanha pagamentos.' },
       { icone: '🔍', titulo: 'Auditoria',                desc: 'Visualiza trilha de auditoria de todas as operações.' },
     ],
-    funcionalidades: ['criar_contrato','enviar_contrato','decidir_contrato','ativar_contrato',
+    funcionalidades: ['ver_contratos','criar_contrato','enviar_contrato','decidir_contrato','ativar_contrato',
                       'criar_mensagem','criar_caso','criar_reembolso','aprovar_reembolso',
                       'pagar_reembolso','upload_arquivo','gerar_cobranca'],
   },
@@ -36,7 +36,7 @@ const CARGOS = [
       { icone: '💸', titulo: 'Autorização financeira',  desc: 'Aprova reembolsos e gera cobranças para a loja.' },
       { icone: '📣', titulo: 'Comunicação oficial',     desc: 'Cria e monitora mensagens e casos operacionais.' },
     ],
-    funcionalidades: ['criar_contrato','enviar_contrato','decidir_contrato','ativar_contrato',
+    funcionalidades: ['ver_contratos','criar_contrato','enviar_contrato','decidir_contrato','ativar_contrato',
                       'criar_mensagem','criar_caso','criar_reembolso','aprovar_reembolso',
                       'pagar_reembolso','upload_arquivo','gerar_cobranca'],
   },
@@ -98,7 +98,7 @@ const CARGOS = [
       { icone: '📋', titulo: 'Gestão de contratos',   desc: 'Cria e submete contratos para aprovação.' },
       { icone: '📁', titulo: 'Arquivo da loja',       desc: 'Organiza e mantém os documentos oficiais.' },
     ],
-    funcionalidades: ['criar_contrato','enviar_contrato','criar_mensagem','criar_caso',
+    funcionalidades: ['ver_contratos','criar_contrato','enviar_contrato','criar_mensagem','criar_caso',
                       'criar_reembolso','upload_arquivo'],
   },
   {
@@ -329,6 +329,13 @@ const FUNCIONALIDADES = {
     cor: '#475569',
     customOnClick: 'abrirModulo("inventario")',
   },
+  ver_contratos: {
+    icone: '📄', titulo: 'Ver Contratos',
+    desc: 'Lista todos os contratos da loja com vigência, situação financeira e acesso ao arquivo para leitura.',
+    quem: 'admin_principal, veneravel_mestre, secretario',
+    cor: '#0369a1',
+    customOnClick: 'abrirModulo("ver_contratos")',
+  },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -482,7 +489,8 @@ async function login() {
 function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
    'relatoriosView','permissoesView','comissoesView','repositorioView',
-   'agendaView','irmaoDetalheView','usuariosView','inventarioView','whatsappView'].forEach(v => {
+   'agendaView','irmaoDetalheView','usuariosView','inventarioView','whatsappView',
+   'contratosView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -607,6 +615,7 @@ function abrirModulo(id) {
     usuarios:       () => { mostrarView('usuariosView');   renderUsuariosView(); },
     inventario:     () => { mostrarView('inventarioView'); renderInventarioView(); },
     whatsapp:       () => { mostrarView('whatsappView');   renderWhatsAppView(); },
+    ver_contratos:  () => { mostrarView('contratosView');  renderContratosView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -3357,6 +3366,89 @@ async function _wppDesconectar() {
   } catch(e) {
     alert('Erro: ' + e.message);
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MÓDULO — CONTRATOS
+// ═══════════════════════════════════════════════════════════
+
+const STATUS_CONTRATO = {
+  rascunho:  { label: 'Rascunho',  cor: '#64748b' },
+  enviado:   { label: 'Enviado',   cor: '#0369a1' },
+  aprovado:  { label: 'Aprovado',  cor: '#059669' },
+  ativo:     { label: 'Ativo',     cor: '#16a34a' },
+  recusado:  { label: 'Recusado',  cor: '#dc2626' },
+  encerrado: { label: 'Encerrado', cor: '#94a3b8' },
+};
+
+async function renderContratosView() {
+  const view = document.getElementById('contratosView');
+  view.innerHTML = `<div style="padding:32px;color:#64748b">Carregando contratos…</div>`;
+  try {
+    const lista = await api('GET', '/contracts');
+    if (!lista.length) {
+      view.innerHTML = `
+        <div style="padding:24px">
+          <h2 style="font-size:20px;font-weight:700;margin:0 0 16px">Contratos</h2>
+          <p style="color:#64748b">Nenhum contrato cadastrado ainda.</p>
+        </div>`;
+      return;
+    }
+    const rows = lista.map(c => {
+      const st = STATUS_CONTRATO[c.status] || { label: c.status, cor: '#64748b' };
+      const badge = (txt, cor) =>
+        `<span style="background:${cor}18;color:${cor};border:1px solid ${cor}33;
+                padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600">${txt}</span>`;
+      const pagto = c.inadimplente ? badge('Em atraso','#dc2626') : badge('Em dia','#16a34a');
+      const arq   = c.arquivo_url
+        ? `<button onclick="verArquivoContrato('${c.arquivo_url}')"
+              style="background:#0369a1;color:#fff;border:none;padding:4px 12px;
+                     border-radius:6px;cursor:pointer;font-size:13px">📄 Abrir</button>`
+        : '<span style="color:#94a3b8;font-size:13px">—</span>';
+      const ini = c.vigencia_inicio ? c.vigencia_inicio.substring(0,10) : '—';
+      const fim = c.vigencia_fim    ? c.vigencia_fim.substring(0,10)    : '—';
+      return `<tr style="border-bottom:1px solid #f1f5f9">
+        <td style="padding:10px 14px;font-weight:500">${c.loja_nome}</td>
+        <td style="padding:10px 14px">${ini}</td>
+        <td style="padding:10px 14px">${fim}</td>
+        <td style="padding:10px 14px">${badge(st.label, st.cor)}</td>
+        <td style="padding:10px 14px">${pagto}</td>
+        <td style="padding:10px 14px">${arq}</td>
+      </tr>`;
+    }).join('');
+    view.innerHTML = `
+      <div style="padding:24px">
+        <h2 style="font-size:20px;font-weight:700;margin:0 0 16px">Contratos</h2>
+        <div style="overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0">
+          <table style="width:100%;border-collapse:collapse;background:#fff">
+            <thead>
+              <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+                <th style="padding:10px 14px;text-align:left;font-size:13px;color:#475569">Loja</th>
+                <th style="padding:10px 14px;text-align:left;font-size:13px;color:#475569">Início</th>
+                <th style="padding:10px 14px;text-align:left;font-size:13px;color:#475569">Término</th>
+                <th style="padding:10px 14px;text-align:left;font-size:13px;color:#475569">Status</th>
+                <th style="padding:10px 14px;text-align:left;font-size:13px;color:#475569">Pagamento</th>
+                <th style="padding:10px 14px;text-align:left;font-size:13px;color:#475569">Arquivo</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch(e) {
+    view.innerHTML = `<div style="padding:24px;color:#dc2626">Erro ao carregar contratos: ${e.message}</div>`;
+  }
+}
+
+async function verArquivoContrato(url) {
+  try {
+    const opts = { headers: {} };
+    if (state.token) opts.headers['Authorization'] = 'Basic ' + state.token;
+    const res = await fetch(apiBase() + url, opts);
+    if (!res.ok) { alert('Arquivo não disponível.'); return; }
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  } catch(e) { alert('Erro ao abrir arquivo: ' + e.message); }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

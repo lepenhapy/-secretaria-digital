@@ -739,6 +739,35 @@ def create_contract(payload: CreateContractInput, actor: Actor = Depends(get_cur
     return {"status": "created", "contract_id": contrato_id}
 
 
+@app.get("/contracts")
+def list_contracts(actor: Actor = Depends(get_current_actor), db=Depends(get_database)):
+    with db.transaction() as tx:
+        if actor.cargo == 'admin_principal':
+            filtro, params = "", []
+        else:
+            filtro, params = "AND c.loja_id = %s", [actor.loja_id]
+        rows = tx.fetch_all(
+            f"""
+            SELECT c.id, c.loja_id,
+                   COALESCE(l.nome, 'Loja ' || c.loja_id) AS loja_nome,
+                   c.vigencia_inicio, c.vigencia_fim, c.status, c.arquivo_url,
+                   EXISTS(
+                       SELECT 1 FROM cobrancas cb
+                       WHERE cb.loja_id = c.loja_id
+                         AND cb.status = 'pendente'
+                         AND cb.data_vencimento < CURRENT_DATE
+                         AND cb.deleted_at IS NULL
+                   ) AS inadimplente
+            FROM contratos c
+            LEFT JOIN lojas l ON l.id = c.loja_id
+            WHERE c.deleted_at IS NULL {filtro}
+            ORDER BY l.nome, c.vigencia_inicio DESC
+            """,
+            params,
+        )
+    return [dict(r) for r in rows]
+
+
 @app.get("/contracts/{contract_id}")
 def get_contract(contract_id: int, actor: Actor = Depends(get_current_actor), services: CoreTransactionServices = Depends(get_services)):
     try:
