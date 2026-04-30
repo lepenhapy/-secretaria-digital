@@ -810,7 +810,7 @@ async function renderIrmaoView() {
         <div class="form-group">
           <label class="form-label">Potência</label>
           <select class="form-select" id="fi_potencia">
-            <option>GOB</option><option>COMAB</option><option>COMOB</option><option>Outra</option>
+            <option selected>GOE</option><option>GLEMT</option><option>GOB</option><option>COMAB</option><option>COMOB</option><option>Outra</option>
           </select>
         </div>
         <div class="form-group">
@@ -910,6 +910,8 @@ async function salvarIrmao() {
     // Limpa o formulário
     ['fi_nome','fi_cim','fi_potencia','fi_loja','fi_tel','fi_nasc','fi_esposa','fi_filhos']
       .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+    const potenciaInput = document.getElementById('fi_potencia');
+    if (potenciaInput) potenciaInput.value = 'GOE';
     setTimeout(() => renderIrmaoView(), 800);
   } catch (e) {
     res.className = 'modal-result error';
@@ -932,7 +934,7 @@ async function editarIrmao(id) {
         <input class="modal-input" id="ei_cim" value="${ir.cim||''}" /></div>
       <div class="form-group"><label>Potência</label>
         <select class="modal-input" id="ei_potencia">
-          ${['GOB','COMAB','COMOB','Outra'].map(p=>`<option${ir.potencia===p?' selected':''}>${p}</option>`).join('')}
+          ${['GOE','GLEMT','GOB','COMAB','COMOB','Outra'].map(p=>`<option${ir.potencia===p?' selected':''}>${p}</option>`).join('')}
         </select></div>
       <div class="form-group"><label>WhatsApp / Celular</label>
         <input class="modal-input" id="ei_tel" value="${ir.telefone||''}" /></div>
