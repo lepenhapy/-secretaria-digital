@@ -498,6 +498,27 @@ def _ensure_schema(db) -> None:
         """INSERT INTO cargos (nome, nivel_hierarquico) VALUES
            ('mestre_banquete', 55), ('obreiro', 20), ('irmao_loja', 15)
            ON CONFLICT (nome) DO NOTHING""",
+        # ── 027: tarefas ──────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS tarefas (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            criado_por_usuario_id INT REFERENCES usuarios(id),
+            responsavel_usuario_id INT REFERENCES usuarios(id),
+            irmao_id INT REFERENCES irmaos(id),
+            titulo VARCHAR(200) NOT NULL,
+            descricao TEXT,
+            status VARCHAR(30) NOT NULL DEFAULT 'pendente'
+                CHECK (status IN ('pendente','em_andamento','concluida','cancelada')),
+            prioridade VARCHAR(20) NOT NULL DEFAULT 'normal'
+                CHECK (prioridade IN ('baixa','normal','alta','urgente')),
+            vencimento DATE,
+            google_task_id VARCHAR(200),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ)""",
+        "CREATE INDEX IF NOT EXISTS idx_tarefas_loja_id ON tarefas(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_tarefas_status ON tarefas(status)",
+        "CREATE INDEX IF NOT EXISTS idx_tarefas_vencimento ON tarefas(vencimento)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -2530,6 +2551,134 @@ def deletar_item_inventario(
 ):
     with db.transaction() as tx:
         tx.execute("DELETE FROM inventario_loja WHERE id=%s", (item_id,))
+
+
+# ═══════════════════════════════════════════════════════════
+#  TAREFAS
+# ═══════════════════════════════════════════════════════════
+
+class TarefaCreateInput(BaseModel):
+    titulo: str
+    descricao: Optional[str] = None
+    prioridade: str = "normal"
+    vencimento: Optional[str] = None
+    responsavel_usuario_id: Optional[int] = None
+    irmao_id: Optional[int] = None
+
+class TarefaUpdateInput(BaseModel):
+    titulo: Optional[str] = None
+    descricao: Optional[str] = None
+    prioridade: Optional[str] = None
+    vencimento: Optional[str] = None
+    responsavel_usuario_id: Optional[int] = None
+    irmao_id: Optional[int] = None
+
+class TarefaStatusInput(BaseModel):
+    status: str
+
+@app.get("/tarefas")
+def listar_tarefas(
+    status: Optional[str] = Query(None),
+    prioridade: Optional[str] = Query(None),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        filtros, params = ["t.loja_id = %s", "t.deleted_at IS NULL"], [actor.loja_id or 0]
+        if status:
+            filtros.append("t.status = %s"); params.append(status)
+        if prioridade:
+            filtros.append("t.prioridade = %s"); params.append(prioridade)
+        where = " AND ".join(filtros)
+        rows = tx.fetch_all(
+            f"""SELECT t.id, t.titulo, t.descricao, t.status, t.prioridade,
+                       t.vencimento, t.irmao_id, t.responsavel_usuario_id,
+                       t.created_at, t.updated_at,
+                       i.nome AS irmao_nome,
+                       u.nome AS responsavel_nome
+                FROM tarefas t
+                LEFT JOIN irmaos i ON i.id = t.irmao_id
+                LEFT JOIN usuarios u ON u.id = t.responsavel_usuario_id
+                WHERE {where}
+                ORDER BY
+                    CASE t.prioridade WHEN 'urgente' THEN 1 WHEN 'alta' THEN 2
+                                      WHEN 'normal' THEN 3 ELSE 4 END,
+                    t.vencimento ASC NULLS LAST, t.created_at DESC""",
+            params,
+        )
+    return [dict(r) for r in rows]
+
+@app.post("/tarefas", status_code=201)
+def criar_tarefa(
+    payload: TarefaCreateInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            """INSERT INTO tarefas
+               (loja_id, criado_por_usuario_id, titulo, descricao, prioridade,
+                vencimento, responsavel_usuario_id, irmao_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (actor.loja_id, actor.user_id, payload.titulo, payload.descricao,
+             payload.prioridade, payload.vencimento or None,
+             payload.responsavel_usuario_id, payload.irmao_id),
+        )
+    return {"id": row["id"], "status": "created"}
+
+@app.put("/tarefas/{tarefa_id}")
+def atualizar_tarefa(
+    tarefa_id: int,
+    payload: TarefaUpdateInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        existing = tx.fetch_one(
+            "SELECT id FROM tarefas WHERE id=%s AND loja_id=%s AND deleted_at IS NULL",
+            (tarefa_id, actor.loja_id or 0),
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
+        sets, params = [], []
+        if payload.titulo      is not None: sets.append("titulo=%s");                   params.append(payload.titulo)
+        if payload.descricao   is not None: sets.append("descricao=%s");                params.append(payload.descricao)
+        if payload.prioridade  is not None: sets.append("prioridade=%s");               params.append(payload.prioridade)
+        if payload.vencimento  is not None: sets.append("vencimento=%s");               params.append(payload.vencimento or None)
+        if payload.responsavel_usuario_id is not None:
+            sets.append("responsavel_usuario_id=%s"); params.append(payload.responsavel_usuario_id)
+        if payload.irmao_id    is not None: sets.append("irmao_id=%s");                 params.append(payload.irmao_id)
+        if sets:
+            sets.append("updated_at=NOW()")
+            params.append(tarefa_id)
+            tx.execute(f"UPDATE tarefas SET {', '.join(sets)} WHERE id=%s", params)
+    return {"status": "updated"}
+
+@app.patch("/tarefas/{tarefa_id}/status")
+def atualizar_status_tarefa(
+    tarefa_id: int,
+    payload: TarefaStatusInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE tarefas SET status=%s, updated_at=NOW() WHERE id=%s AND loja_id=%s AND deleted_at IS NULL",
+            (payload.status, tarefa_id, actor.loja_id or 0),
+        )
+    return {"status": "updated"}
+
+@app.delete("/tarefas/{tarefa_id}", status_code=204)
+def deletar_tarefa(
+    tarefa_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE tarefas SET deleted_at=NOW() WHERE id=%s AND loja_id=%s",
+            (tarefa_id, actor.loja_id or 0),
+        )
 
 
 # ═══════════════════════════════════════════════════════════

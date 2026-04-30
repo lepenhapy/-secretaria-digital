@@ -19,7 +19,7 @@ const CARGOS = [
       { icone: '💰', titulo: 'Controle financeiro',      desc: 'Autoriza reembolsos, gera cobranças e acompanha pagamentos.' },
       { icone: '🔍', titulo: 'Auditoria',                desc: 'Visualiza trilha de auditoria de todas as operações.' },
     ],
-    funcionalidades: ['ver_contratos','criar_contrato','enviar_contrato','decidir_contrato','ativar_contrato',
+    funcionalidades: ['tarefas','ver_contratos','criar_contrato','enviar_contrato','decidir_contrato','ativar_contrato',
                       'criar_mensagem','criar_caso','criar_reembolso','aprovar_reembolso',
                       'pagar_reembolso','upload_arquivo','gerar_cobranca'],
   },
@@ -36,7 +36,7 @@ const CARGOS = [
       { icone: '💸', titulo: 'Autorização financeira',  desc: 'Aprova reembolsos e gera cobranças para a loja.' },
       { icone: '📣', titulo: 'Comunicação oficial',     desc: 'Cria e monitora mensagens e casos operacionais.' },
     ],
-    funcionalidades: ['ver_contratos','criar_contrato','enviar_contrato','decidir_contrato','ativar_contrato',
+    funcionalidades: ['tarefas','ver_contratos','criar_contrato','enviar_contrato','decidir_contrato','ativar_contrato',
                       'criar_mensagem','criar_caso','criar_reembolso','aprovar_reembolso',
                       'pagar_reembolso','upload_arquivo','gerar_cobranca'],
   },
@@ -52,7 +52,7 @@ const CARGOS = [
       { icone: '🔄', titulo: 'Substituição do VM',       desc: 'Assume a presidência na ausência do Venerável Mestre.' },
       { icone: '📋', titulo: 'Decisão de contratos',     desc: 'Pode aprovar ou rejeitar contratos quando delegado.' },
     ],
-    funcionalidades: ['decidir_contrato','criar_mensagem','criar_caso','criar_reembolso',
+    funcionalidades: ['tarefas','decidir_contrato','criar_mensagem','criar_caso','criar_reembolso',
                       'aprovar_reembolso','upload_arquivo'],
   },
   {
@@ -67,7 +67,7 @@ const CARGOS = [
       { icone: '📩', titulo: 'Registro de ocorrências',    desc: 'Cria mensagens e abre casos operacionais.' },
       { icone: '📁', titulo: 'Gestão de arquivos',         desc: 'Envia e organiza documentos relacionados à loja.' },
     ],
-    funcionalidades: ['criar_mensagem','criar_caso','upload_arquivo'],
+    funcionalidades: ['tarefas','criar_mensagem','criar_caso','upload_arquivo'],
   },
   {
     id: 'financeiro',
@@ -329,6 +329,13 @@ const FUNCIONALIDADES = {
     cor: '#475569',
     customOnClick: 'abrirModulo("inventario")',
   },
+  tarefas: {
+    icone: '✅', titulo: 'Tarefas',
+    desc: 'Crie, atribua e acompanhe tarefas da loja com prioridade, vencimento e status em tempo real.',
+    quem: 'admin_principal, veneravel_mestre, secretario, financeiro, chanceler, primeiro_vigilante, segundo_vigilante',
+    cor: '#16a34a',
+    customOnClick: 'abrirModulo("tarefas")',
+  },
   ver_contratos: {
     icone: '📄', titulo: 'Ver Contratos',
     desc: 'Lista todos os contratos da loja com vigência, situação financeira e acesso ao arquivo para leitura.',
@@ -490,7 +497,7 @@ function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
    'relatoriosView','permissoesView','comissoesView','repositorioView',
    'agendaView','irmaoDetalheView','usuariosView','inventarioView','whatsappView',
-   'contratosView'].forEach(v => {
+   'contratosView','tarefasView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -616,6 +623,7 @@ function abrirModulo(id) {
     inventario:     () => { mostrarView('inventarioView'); renderInventarioView(); },
     whatsapp:       () => { mostrarView('whatsappView');   renderWhatsAppView(); },
     ver_contratos:  () => { mostrarView('contratosView');  renderContratosView(); },
+    tarefas:        () => { mostrarView('tarefasView');    renderTarefasView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -3366,6 +3374,205 @@ async function _wppDesconectar() {
   } catch(e) {
     alert('Erro: ' + e.message);
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MÓDULO — TAREFAS
+// ═══════════════════════════════════════════════════════════
+
+const PRIORIDADE_CFG = {
+  urgente: { label:'Urgente', cor:'#dc2626' },
+  alta:    { label:'Alta',    cor:'#ea580c' },
+  normal:  { label:'Normal',  cor:'#0369a1' },
+  baixa:   { label:'Baixa',   cor:'#64748b' },
+};
+const STATUS_TAREFA_CFG = {
+  pendente:     { label:'Pendente',     cor:'#64748b' },
+  em_andamento: { label:'Em andamento', cor:'#0369a1' },
+  concluida:    { label:'Concluída',    cor:'#16a34a' },
+  cancelada:    { label:'Cancelada',    cor:'#94a3b8' },
+};
+
+let _tarefasFiltroStatus = '';
+let _tarefasFiltroprior  = '';
+
+async function renderTarefasView() {
+  const view = document.getElementById('tarefasView');
+  view.innerHTML = `<div style="padding:32px;color:#64748b">Carregando tarefas…</div>`;
+  try {
+    let url = '/tarefas';
+    const qs = [];
+    if (_tarefasFiltroStatus) qs.push(`status=${_tarefasFiltroStatus}`);
+    if (_tarefasFiltroprior)  qs.push(`prioridade=${_tarefasFiltroprior}`);
+    if (qs.length) url += '?' + qs.join('&');
+
+    const lista = await api('GET', url);
+    const hoje = new Date().toISOString().substring(0,10);
+
+    const cards = lista.length ? lista.map(t => {
+      const pr = PRIORIDADE_CFG[t.prioridade] || PRIORIDADE_CFG.normal;
+      const st = STATUS_TAREFA_CFG[t.status]  || STATUS_TAREFA_CFG.pendente;
+      const venc = t.vencimento ? t.vencimento.substring(0,10) : null;
+      const atrasada = venc && venc < hoje && t.status !== 'concluida' && t.status !== 'cancelada';
+      const vencTxt = venc
+        ? `<span style="color:${atrasada?'#dc2626':'#64748b'};font-size:12px">
+             ${atrasada?'⚠️ ':''} Vence ${venc}</span>`
+        : '';
+      const resp = t.responsavel_nome || t.irmao_nome || '—';
+      const badge = (txt,cor) =>
+        `<span style="background:${cor}18;color:${cor};border:1px solid ${cor}33;
+                padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600">${txt}</span>`;
+      const concluida = t.status === 'concluida';
+      return `
+        <div style="background:#fff;border:1px solid ${atrasada?'#fca5a5':'#e2e8f0'};
+                    border-left:4px solid ${pr.cor};border-radius:10px;
+                    padding:14px 16px;display:flex;gap:12px;align-items:flex-start">
+          <input type="checkbox" ${concluida?'checked':''} style="margin-top:3px;cursor:pointer;width:16px;height:16px"
+            onchange="toggleTarefaConcluida(${t.id}, this.checked)">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-weight:600;font-size:15px;${concluida?'text-decoration:line-through;color:#94a3b8':''}">${t.titulo}</span>
+              ${badge(pr.label, pr.cor)} ${badge(st.label, st.cor)}
+            </div>
+            ${t.descricao ? `<div style="color:#64748b;font-size:13px;margin-top:4px">${t.descricao}</div>` : ''}
+            <div style="display:flex;gap:16px;margin-top:6px;flex-wrap:wrap">
+              <span style="color:#64748b;font-size:12px">👤 ${resp}</span>
+              ${vencTxt}
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button onclick="abrirEditarTarefa(${t.id})"
+              style="background:#f1f5f9;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px">✏️</button>
+            <button onclick="confirmarDeletarTarefa(${t.id})"
+              style="background:#fef2f2;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px">🗑️</button>
+          </div>
+        </div>`;
+    }).join('') : `<div style="color:#94a3b8;text-align:center;padding:40px">Nenhuma tarefa encontrada.</div>`;
+
+    view.innerHTML = `
+      <div style="padding:24px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+          <h2 style="font-size:20px;font-weight:700;margin:0">Tarefas</h2>
+          <button onclick="abrirNovaTarefa()"
+            style="background:#16a34a;color:#fff;border:none;padding:8px 18px;
+                   border-radius:8px;cursor:pointer;font-weight:600;font-size:14px">+ Nova Tarefa</button>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+          <select onchange="_tarefasFiltroStatus=this.value;renderTarefasView()"
+            style="padding:6px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+            <option value="">Todos os status</option>
+            <option value="pendente" ${_tarefasFiltroStatus==='pendente'?'selected':''}>Pendente</option>
+            <option value="em_andamento" ${_tarefasFiltroStatus==='em_andamento'?'selected':''}>Em andamento</option>
+            <option value="concluida" ${_tarefasFiltroStatus==='concluida'?'selected':''}>Concluída</option>
+            <option value="cancelada" ${_tarefasFiltroStatus==='cancelada'?'selected':''}>Cancelada</option>
+          </select>
+          <select onchange="_tarefasFiltroprior=this.value;renderTarefasView()"
+            style="padding:6px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+            <option value="">Todas as prioridades</option>
+            <option value="urgente" ${_tarefasFiltroprior==='urgente'?'selected':''}>Urgente</option>
+            <option value="alta"    ${_tarefasFiltroprior==='alta'?'selected':''}>Alta</option>
+            <option value="normal"  ${_tarefasFiltroprior==='normal'?'selected':''}>Normal</option>
+            <option value="baixa"   ${_tarefasFiltroprior==='baixa'?'selected':''}>Baixa</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">${cards}</div>
+      </div>
+      ${_modalTarefa()}`;
+  } catch(e) {
+    view.innerHTML = `<div style="padding:24px;color:#dc2626">Erro: ${e.message}</div>`;
+  }
+}
+
+function _modalTarefa(t = null) {
+  const id = t ? t.id : '';
+  return `
+    <div id="modalTarefaOverlay" class="modal-overlay" onclick="fecharModalTarefa()" style="display:none">
+      <div class="modal-box" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <div class="modal-title">${t ? 'Editar Tarefa' : 'Nova Tarefa'}</div>
+          <button class="modal-close" onclick="fecharModalTarefa()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div><div class="modal-label">Título *</div>
+            <input class="modal-input" id="tf_titulo" value="${t?.titulo||''}" placeholder="Título da tarefa" /></div>
+          <div><div class="modal-label">Descrição</div>
+            <textarea class="modal-input" id="tf_desc" rows="3"
+              style="resize:vertical">${t?.descricao||''}</textarea></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><div class="modal-label">Prioridade</div>
+              <select class="modal-input" id="tf_prior">
+                ${['urgente','alta','normal','baixa'].map(p=>
+                  `<option value="${p}" ${(t?.prioridade||'normal')===p?'selected':''}>${PRIORIDADE_CFG[p].label}</option>`
+                ).join('')}
+              </select></div>
+            <div><div class="modal-label">Vencimento</div>
+              <input class="modal-input" id="tf_venc" type="date" value="${t?.vencimento?t.vencimento.substring(0,10):''}" /></div>
+          </div>
+          <div id="tf_msg" class="modal-result" style="display:none"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="func-btn neutral" onclick="fecharModalTarefa()">Cancelar</button>
+          <button class="func-btn primary" onclick="salvarTarefa('${id}')">Salvar</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function abrirNovaTarefa() {
+  const view = document.getElementById('tarefasView');
+  const old = document.getElementById('modalTarefaOverlay');
+  if (old) old.remove();
+  view.insertAdjacentHTML('beforeend', _modalTarefa());
+  document.getElementById('modalTarefaOverlay').style.display = 'flex';
+}
+
+async function abrirEditarTarefa(id) {
+  try {
+    const lista = await api('GET', `/tarefas?status=`);
+    const t = lista.find(x => x.id === id);
+    if (!t) return;
+    const view = document.getElementById('tarefasView');
+    const old = document.getElementById('modalTarefaOverlay');
+    if (old) old.remove();
+    view.insertAdjacentHTML('beforeend', _modalTarefa(t));
+    document.getElementById('modalTarefaOverlay').style.display = 'flex';
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+function fecharModalTarefa() {
+  const el = document.getElementById('modalTarefaOverlay');
+  if (el) el.style.display = 'none';
+}
+
+async function salvarTarefa(id) {
+  const titulo = document.getElementById('tf_titulo').value.trim();
+  const msg    = document.getElementById('tf_msg');
+  if (!titulo) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Título obrigatório.'; return; }
+  const payload = {
+    titulo,
+    descricao:  document.getElementById('tf_desc').value.trim() || null,
+    prioridade: document.getElementById('tf_prior').value,
+    vencimento: document.getElementById('tf_venc').value || null,
+  };
+  try {
+    if (id) await api('PUT', `/tarefas/${id}`, payload);
+    else    await api('POST', '/tarefas', payload);
+    fecharModalTarefa();
+    renderTarefasView();
+  } catch(e) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message;
+  }
+}
+
+async function toggleTarefaConcluida(id, concluida) {
+  await api('PATCH', `/tarefas/${id}/status`, { status: concluida ? 'concluida' : 'pendente' });
+  renderTarefasView();
+}
+
+async function confirmarDeletarTarefa(id) {
+  if (!confirm('Excluir esta tarefa?')) return;
+  await api('DELETE', `/tarefas/${id}`);
+  renderTarefasView();
 }
 
 // ═══════════════════════════════════════════════════════════
