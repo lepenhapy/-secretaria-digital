@@ -57,6 +57,154 @@ from backend_services.core_transaction_services import (
 def _ensure_schema(db) -> None:
     """Aplica DDL incremental na inicialização — idempotente."""
     stmts = [
+        # ── 001: tabelas base de identidade ──────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS cargos (
+            id BIGSERIAL PRIMARY KEY,
+            nome VARCHAR(100) NOT NULL UNIQUE,
+            nivel_hierarquico INTEGER NOT NULL DEFAULT 0 CHECK (nivel_hierarquico >= 0),
+            created_at TIMESTAMP NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS lojas (
+            id BIGSERIAL PRIMARY KEY,
+            nome VARCHAR(150) NOT NULL,
+            status VARCHAR(30) NOT NULL DEFAULT 'pendente'
+                CHECK (status IN ('pendente','ativa','inativa','bloqueada')),
+            plano VARCHAR(50),
+            telefone_whatsapp VARCHAR(30),
+            cidade VARCHAR(120),
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
+        """CREATE TABLE IF NOT EXISTS usuarios (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT REFERENCES lojas(id),
+            cargo_id BIGINT NOT NULL REFERENCES cargos(id),
+            nome VARCHAR(150) NOT NULL,
+            email VARCHAR(150) NOT NULL UNIQUE,
+            senha_hash TEXT NOT NULL,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP)""",
+        """CREATE TABLE IF NOT EXISTS delegacoes (
+            id BIGSERIAL PRIMARY KEY,
+            concedido_por_usuario_id BIGINT NOT NULL REFERENCES usuarios(id),
+            concedido_para_usuario_id BIGINT NOT NULL REFERENCES usuarios(id),
+            permissao VARCHAR(100) NOT NULL,
+            escopo VARCHAR(100),
+            limite_valor NUMERIC(12,2) CHECK (limite_valor IS NULL OR limite_valor >= 0),
+            inicio_vigencia TIMESTAMP NOT NULL,
+            fim_vigencia TIMESTAMP,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            CHECK (fim_vigencia IS NULL OR fim_vigencia >= inicio_vigencia))""",
+        """CREATE TABLE IF NOT EXISTS irmaos (
+            id BIGSERIAL PRIMARY KEY,
+            loja_id BIGINT NOT NULL REFERENCES lojas(id),
+            nome VARCHAR(150) NOT NULL,
+            telefone VARCHAR(30),
+            status VARCHAR(30) NOT NULL DEFAULT 'ativo'
+                CHECK (status IN ('ativo','inativo','bloqueado')),
+            observacoes TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMP,
+            CHECK (observacoes IS NULL OR length(observacoes) <= 5000))""",
+        "CREATE INDEX IF NOT EXISTS idx_usuarios_loja_id ON usuarios(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_irmaos_loja_id ON irmaos(loja_id)",
+        # ── 015: seed cargos iniciais ─────────────────────────────────────────
+        """INSERT INTO cargos (nome, nivel_hierarquico) VALUES
+           ('admin_principal', 100), ('veneravel_mestre', 90),
+           ('primeiro_vigilante', 80), ('segundo_vigilante', 70),
+           ('financeiro', 60), ('secretario', 60), ('chanceler', 60),
+           ('arquiteto', 60), ('almoxarife', 60), ('irmao_operacional', 10)
+           ON CONFLICT (nome) DO NOTHING""",
+        # ── 018: compras, rateio ──────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS centros_custo (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            nome VARCHAR(100) NOT NULL, descricao TEXT,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS regras_rateio (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            nome VARCHAR(100) NOT NULL, descricao TEXT,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            criado_por INT REFERENCES usuarios(id),
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS regras_rateio_itens (
+            id SERIAL PRIMARY KEY,
+            regra_id INT NOT NULL REFERENCES regras_rateio(id) ON DELETE CASCADE,
+            centro_custo_id INT NOT NULL REFERENCES centros_custo(id),
+            percentual NUMERIC(6,3) NOT NULL CHECK (percentual > 0 AND percentual <= 100))""",
+        """CREATE TABLE IF NOT EXISTS compras (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            usuario_id INT NOT NULL REFERENCES usuarios(id),
+            evento VARCHAR(200) NOT NULL,
+            valor NUMERIC(12,2) NOT NULL,
+            regra_rateio_id INT REFERENCES regras_rateio(id),
+            status VARCHAR(20) NOT NULL DEFAULT 'pendente'
+                CHECK (status IN ('pendente','aprovado','rejeitado')),
+            aprovado_por INT REFERENCES usuarios(id),
+            aprovado_em TIMESTAMPTZ, observacao TEXT,
+            visivel BOOLEAN NOT NULL DEFAULT TRUE,
+            whatsapp_from VARCHAR(50),
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS compras_arquivos (
+            id SERIAL PRIMARY KEY,
+            compra_id INT NOT NULL REFERENCES compras(id) ON DELETE CASCADE,
+            tipo VARCHAR(20) NOT NULL DEFAULT 'arquivo'
+                CHECK (tipo IN ('foto','cupom','arquivo')),
+            caminho VARCHAR(500) NOT NULL, nome_original VARCHAR(200),
+            tamanho_bytes INT, sha256 VARCHAR(64),
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS notificacoes_destinatarios (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            evento_tipo VARCHAR(50) NOT NULL,
+            usuario_id INT NOT NULL REFERENCES usuarios(id),
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            UNIQUE (loja_id, evento_tipo, usuario_id))""",
+        "CREATE INDEX IF NOT EXISTS idx_compras_loja_id ON compras(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_compras_usuario_id ON compras(usuario_id)",
+        "CREATE INDEX IF NOT EXISTS idx_compras_status ON compras(status)",
+        "CREATE INDEX IF NOT EXISTS idx_compras_criado_em ON compras(criado_em)",
+        # ── 020: repositorio_arquivos ─────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS repositorio_arquivos (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            usuario_id INT REFERENCES usuarios(id),
+            contexto VARCHAR(50) NOT NULL DEFAULT 'geral',
+            contexto_id INT, descricao TEXT,
+            caminho VARCHAR(500) NOT NULL, nome_original VARCHAR(200),
+            mimetype VARCHAR(100), tamanho_bytes INT, sha256 VARCHAR(64),
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        "CREATE INDEX IF NOT EXISTS idx_repos_loja_id ON repositorio_arquivos(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_repos_usuario_id ON repositorio_arquivos(usuario_id)",
+        "CREATE INDEX IF NOT EXISTS idx_repos_criado_em ON repositorio_arquivos(criado_em DESC)",
+        # ── 021: sessoes_recorrentes, agenda_eventos ──────────────────────────
+        """CREATE TABLE IF NOT EXISTS sessoes_recorrentes (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            titulo VARCHAR(200) NOT NULL, descricao TEXT,
+            tipo VARCHAR(30) NOT NULL DEFAULT 'sessao'
+                CHECK (tipo IN ('sessao','agape','administrativa','especial')),
+            frequencia VARCHAR(30) NOT NULL
+                CHECK (frequencia IN ('semanal','quinzenal','mensal_dia_semana','mensal_dia_numero')),
+            dia_semana SMALLINT CHECK (dia_semana BETWEEN 0 AND 6),
+            semana_mes SMALLINT CHECK (semana_mes BETWEEN 1 AND 5),
+            dia_mes SMALLINT CHECK (dia_mes BETWEEN 1 AND 31),
+            hora_inicio TIME NOT NULL, hora_fim TIME NOT NULL,
+            cor VARCHAR(7) NOT NULL DEFAULT '#2563eb',
+            vigencia_inicio DATE NOT NULL DEFAULT CURRENT_DATE,
+            vigencia_fim DATE, ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS agenda_eventos (
+            id SERIAL PRIMARY KEY, loja_id INT NOT NULL,
+            titulo VARCHAR(200) NOT NULL, descricao TEXT,
+            tipo VARCHAR(30) NOT NULL DEFAULT 'evento',
+            data DATE NOT NULL, hora_inicio TIME NOT NULL, hora_fim TIME NOT NULL,
+            local VARCHAR(200), cor VARCHAR(7) NOT NULL DEFAULT '#7c3aed',
+            criado_por INT REFERENCES usuarios(id),
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        "CREATE INDEX IF NOT EXISTS idx_sess_rec_loja ON sessoes_recorrentes(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agenda_ev_loja ON agenda_eventos(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agenda_ev_data ON agenda_eventos(data)",
         # ── 002: recursos ────────────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS recursos (
             id BIGSERIAL PRIMARY KEY, nome VARCHAR(150) NOT NULL,

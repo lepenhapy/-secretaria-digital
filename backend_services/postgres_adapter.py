@@ -71,6 +71,14 @@ def _resolve_ipv4(host: str, port: int) -> str:
 
 
 def build_postgres_dsn() -> str:
+    # Railway e outros PaaS fornecem DATABASE_URL diretamente
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        # psycopg3 aceita postgresql:// mas não postgres://
+        if database_url.startswith("postgres://"):
+            database_url = "postgresql://" + database_url[len("postgres://"):]
+        return database_url
+
     host = os.getenv("SD_DB_HOST", "localhost")
     port = os.getenv("SD_DB_PORT", "5432")
     dbname = os.getenv("SD_DB_NAME", "secretaria_digital")
