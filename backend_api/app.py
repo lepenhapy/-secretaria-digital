@@ -499,12 +499,14 @@ def _ensure_schema(db) -> None:
            ('mestre_banquete', 55), ('obreiro', 20), ('irmao_loja', 15)
            ON CONFLICT (nome) DO NOTHING""",
     ]
-    for s in stmts:
-        try:
-            with db.transaction() as tx:
-                tx.execute(s, [])
-        except Exception as exc:
-            print(f"[schema] aviso ({s[:60]!r}): {exc}")
+    # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
+    import psycopg as _psycopg
+    with _psycopg.connect(db.dsn, autocommit=True) as conn:
+        for s in stmts:
+            try:
+                conn.execute(s)
+            except Exception as exc:
+                print(f"[schema] aviso ({s[:60]!r}): {exc}")
 
 
 @asynccontextmanager

@@ -35,7 +35,7 @@ class PostgresDatabase:
         if self._pool is None:
             self._pool = ConnectionPool(
                 self.dsn,
-                min_size=2,
+                min_size=1,
                 max_size=10,
                 kwargs={"row_factory": dict_row},
                 open=True,
