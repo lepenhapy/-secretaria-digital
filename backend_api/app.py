@@ -1,4 +1,5 @@
 import os
+import re as _re
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -1796,15 +1797,16 @@ def excluir_compra(
     if actor.cargo not in ("admin_principal", "veneravel_mestre"):
         raise HTTPException(status_code=403, detail="Sem permissão para excluir compras.")
     with db.transaction() as tx:
-        compra = tx.fetch_one("SELECT id, loja_id FROM compras WHERE id=%s", (compra_id,))
+        compra = tx.fetch_one("SELECT id, loja_id FROM compras WHERE id=%s AND deleted_at IS NULL", (compra_id,))
         if not compra:
             raise HTTPException(status_code=404, detail="Compra não encontrada.")
-        # Busca caminhos de arquivo para limpeza no filesystem
+        if actor.loja_id is not None and compra["loja_id"] != actor.loja_id:
+            raise HTTPException(status_code=403, detail="Sem permissão para excluir esta compra.")
         arquivos = tx.fetch_all(
             "SELECT caminho FROM compras_arquivos WHERE compra_id=%s", (compra_id,)
         )
         tx.execute("DELETE FROM compras_arquivos WHERE compra_id=%s", (compra_id,))
-        tx.execute("DELETE FROM compras WHERE id=%s", (compra_id,))
+        tx.execute("UPDATE compras SET deleted_at=NOW() WHERE id=%s", (compra_id,))
     import pathlib
     for arq in arquivos:
         if arq.get("caminho"):
@@ -2102,7 +2104,19 @@ def excluir_irmao(
     db=Depends(get_database),
 ):
     with db.transaction() as tx:
-        tx.execute("DELETE FROM irmaos WHERE id=%s", (irmao_id,))
+        if actor.loja_id is not None:
+            row = tx.fetch_one(
+                "SELECT id FROM irmaos WHERE id=%s AND loja_id=%s AND deleted_at IS NULL",
+                (irmao_id, actor.loja_id),
+            )
+        else:
+            row = tx.fetch_one(
+                "SELECT id FROM irmaos WHERE id=%s AND deleted_at IS NULL",
+                (irmao_id,),
+            )
+        if not row:
+            raise HTTPException(status_code=404, detail="Irmão não encontrado.")
+        tx.execute("UPDATE irmaos SET deleted_at=NOW() WHERE id=%s", (irmao_id,))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2404,11 +2418,13 @@ def deletar_repositorio(
 ):
     with db.transaction() as tx:
         row = tx.fetch_one(
-            "SELECT caminho FROM repositorio_arquivos WHERE id=%s",
+            "SELECT caminho, loja_id FROM repositorio_arquivos WHERE id=%s",
             (arquivo_id,),
         )
         if not row:
             raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+        if actor.loja_id is not None and row["loja_id"] != actor.loja_id:
+            raise HTTPException(status_code=403, detail="Sem permissão para excluir este arquivo.")
         tx.execute("DELETE FROM repositorio_arquivos WHERE id=%s", (arquivo_id,))
     if row.get("caminho"):
         import pathlib
@@ -2455,6 +2471,8 @@ def criar_categoria(
                VALUES (%s,%s,%s) RETURNING id""",
             (payload.loja_id, payload.nome, payload.descricao),
         )
+    if not row:
+        raise HTTPException(status_code=500, detail="Falha ao criar categoria.")
     return {"id": row["id"]}
 
 @app.put("/categorias-mensalidade/{cat_id}")
@@ -2478,6 +2496,11 @@ def deletar_categoria(
     db=Depends(get_database),
 ):
     with db.transaction() as tx:
+        row = tx.fetch_one("SELECT id, loja_id FROM categorias_mensalidade WHERE id=%s", (cat_id,))
+        if not row:
+            raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+        if actor.loja_id is not None and row["loja_id"] != actor.loja_id:
+            raise HTTPException(status_code=403, detail="Sem permissão para excluir esta categoria.")
         tx.execute("DELETE FROM categorias_mensalidade WHERE id=%s", (cat_id,))
 
 
@@ -2518,6 +2541,8 @@ def criar_item_inventario(
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
 ):
+    if actor.loja_id is not None and payload.loja_id != actor.loja_id:
+        raise HTTPException(status_code=403, detail="Sem permissão para criar item nesta loja.")
     with db.transaction() as tx:
         row = tx.fetch_one(
             """INSERT INTO inventario_loja (loja_id, nome, descricao, quantidade, condicao, precisa_comprar)
@@ -2525,6 +2550,8 @@ def criar_item_inventario(
             (payload.loja_id, payload.nome, payload.descricao,
              payload.quantidade, payload.condicao, payload.precisa_comprar),
         )
+    if not row:
+        raise HTTPException(status_code=500, detail="Falha ao criar item.")
     return {"id": row["id"]}
 
 @app.put("/inventario/{item_id}")
@@ -2550,12 +2577,35 @@ def deletar_item_inventario(
     db=Depends(get_database),
 ):
     with db.transaction() as tx:
+        row = tx.fetch_one("SELECT id, loja_id FROM inventario_loja WHERE id=%s", (item_id,))
+        if not row:
+            raise HTTPException(status_code=404, detail="Item não encontrado.")
+        if actor.loja_id is not None and row["loja_id"] != actor.loja_id:
+            raise HTTPException(status_code=403, detail="Sem permissão para excluir este item.")
         tx.execute("DELETE FROM inventario_loja WHERE id=%s", (item_id,))
 
 
 # ═══════════════════════════════════════════════════════════
 #  TAREFAS
 # ═══════════════════════════════════════════════════════════
+
+_DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+def _parse_date_field(value: Optional[str], field: str = "data") -> Optional[str]:
+    """Valida e retorna uma string de data YYYY-MM-DD, ou None."""
+    if not value:
+        return None
+    if not _DATE_RE.match(value):
+        raise HTTPException(status_code=422,
+            detail=f"Formato inválido para '{field}'. Use YYYY-MM-DD.")
+    return value
+
+def _loja_scope(actor: Actor) -> tuple:
+    """Retorna (cond_sql, params) para filtro de loja. Admin vê tudo."""
+    if actor.loja_id is not None:
+        return "AND loja_id = %s", [actor.loja_id]
+    return "", []
+
 
 class TarefaCreateInput(BaseModel):
     titulo: str
@@ -2583,13 +2633,17 @@ def listar_tarefas(
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
 ):
+    loja_cond, loja_params = _loja_scope(actor)
+    filtros = ["t.deleted_at IS NULL"]
+    params: list = list(loja_params)
+    if actor.loja_id is not None:
+        filtros.insert(0, "t.loja_id = %s")
+    if status:
+        filtros.append("t.status = %s"); params.append(status)
+    if prioridade:
+        filtros.append("t.prioridade = %s"); params.append(prioridade)
+    where = " AND ".join(filtros)
     with db.transaction() as tx:
-        filtros, params = ["t.loja_id = %s", "t.deleted_at IS NULL"], [actor.loja_id or 0]
-        if status:
-            filtros.append("t.status = %s"); params.append(status)
-        if prioridade:
-            filtros.append("t.prioridade = %s"); params.append(prioridade)
-        where = " AND ".join(filtros)
         rows = tx.fetch_all(
             f"""SELECT t.id, t.titulo, t.descricao, t.status, t.prioridade,
                        t.vencimento, t.irmao_id, t.responsavel_usuario_id,
@@ -2614,6 +2668,15 @@ def criar_tarefa(
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
 ):
+    if actor.loja_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Conta de administrador não vinculada a uma loja. "
+                   "Associe o usuário a uma loja para criar tarefas.",
+        )
+    venc = _parse_date_field(payload.vencimento, "vencimento")
+    if payload.prioridade not in ("urgente", "alta", "normal", "baixa"):
+        raise HTTPException(status_code=422, detail="Prioridade inválida.")
     with db.transaction() as tx:
         row = tx.fetch_one(
             """INSERT INTO tarefas
@@ -2621,9 +2684,11 @@ def criar_tarefa(
                 vencimento, responsavel_usuario_id, irmao_id)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (actor.loja_id, actor.user_id, payload.titulo, payload.descricao,
-             payload.prioridade, payload.vencimento or None,
+             payload.prioridade, venc,
              payload.responsavel_usuario_id, payload.irmao_id),
         )
+    if not row:
+        raise HTTPException(status_code=500, detail="Falha ao criar tarefa.")
     return {"id": row["id"], "status": "created"}
 
 @app.put("/tarefas/{tarefa_id}")
@@ -2633,21 +2698,28 @@ def atualizar_tarefa(
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
 ):
+    loja_cond, loja_params = _loja_scope(actor)
     with db.transaction() as tx:
         existing = tx.fetch_one(
-            "SELECT id FROM tarefas WHERE id=%s AND loja_id=%s AND deleted_at IS NULL",
-            (tarefa_id, actor.loja_id or 0),
+            f"SELECT id FROM tarefas WHERE id=%s {loja_cond} AND deleted_at IS NULL",
+            [tarefa_id] + loja_params,
         )
         if not existing:
             raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
         sets, params = [], []
-        if payload.titulo      is not None: sets.append("titulo=%s");                   params.append(payload.titulo)
-        if payload.descricao   is not None: sets.append("descricao=%s");                params.append(payload.descricao)
-        if payload.prioridade  is not None: sets.append("prioridade=%s");               params.append(payload.prioridade)
-        if payload.vencimento  is not None: sets.append("vencimento=%s");               params.append(payload.vencimento or None)
+        if payload.titulo     is not None: sets.append("titulo=%s");    params.append(payload.titulo)
+        if payload.descricao  is not None: sets.append("descricao=%s"); params.append(payload.descricao)
+        if payload.prioridade is not None:
+            if payload.prioridade not in ("urgente", "alta", "normal", "baixa"):
+                raise HTTPException(status_code=422, detail="Prioridade inválida.")
+            sets.append("prioridade=%s"); params.append(payload.prioridade)
+        if payload.vencimento is not None:
+            sets.append("vencimento=%s")
+            params.append(_parse_date_field(payload.vencimento, "vencimento"))
         if payload.responsavel_usuario_id is not None:
             sets.append("responsavel_usuario_id=%s"); params.append(payload.responsavel_usuario_id)
-        if payload.irmao_id    is not None: sets.append("irmao_id=%s");                 params.append(payload.irmao_id)
+        if payload.irmao_id is not None:
+            sets.append("irmao_id=%s"); params.append(payload.irmao_id)
         if sets:
             sets.append("updated_at=NOW()")
             params.append(tarefa_id)
@@ -2661,10 +2733,19 @@ def atualizar_status_tarefa(
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
 ):
+    if payload.status not in ("pendente", "em_andamento", "concluida", "cancelada"):
+        raise HTTPException(status_code=422, detail="Status inválido.")
+    loja_cond, loja_params = _loja_scope(actor)
     with db.transaction() as tx:
+        row = tx.fetch_one(
+            f"SELECT id FROM tarefas WHERE id=%s {loja_cond} AND deleted_at IS NULL",
+            [tarefa_id] + loja_params,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
         tx.execute(
-            "UPDATE tarefas SET status=%s, updated_at=NOW() WHERE id=%s AND loja_id=%s AND deleted_at IS NULL",
-            (payload.status, tarefa_id, actor.loja_id or 0),
+            "UPDATE tarefas SET status=%s, updated_at=NOW() WHERE id=%s",
+            (payload.status, tarefa_id),
         )
     return {"status": "updated"}
 
@@ -2674,11 +2755,15 @@ def deletar_tarefa(
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
 ):
+    loja_cond, loja_params = _loja_scope(actor)
     with db.transaction() as tx:
-        tx.execute(
-            "UPDATE tarefas SET deleted_at=NOW() WHERE id=%s AND loja_id=%s",
-            (tarefa_id, actor.loja_id or 0),
+        row = tx.fetch_one(
+            f"SELECT id FROM tarefas WHERE id=%s {loja_cond} AND deleted_at IS NULL",
+            [tarefa_id] + loja_params,
         )
+        if not row:
+            raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
+        tx.execute("UPDATE tarefas SET deleted_at=NOW() WHERE id=%s", (tarefa_id,))
 
 
 # ═══════════════════════════════════════════════════════════
