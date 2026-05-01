@@ -573,6 +573,21 @@ def _ensure_schema(db) -> None:
             UNIQUE(irmao_id, competencia))""",
         "CREATE INDEX IF NOT EXISTS idx_pag_mens_loja ON pagamentos_mensalidade(loja_id)",
         "CREATE INDEX IF NOT EXISTS idx_pag_mens_comp ON pagamentos_mensalidade(competencia)",
+        # ── 031: grau + data_elevacao em irmaos ──────────────────────────────
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS grau SMALLINT NOT NULL DEFAULT 1",
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS data_elevacao DATE",
+        # ── 032: presencas por sessão ─────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS presencas (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            data DATE NOT NULL,
+            irmao_id INT NOT NULL REFERENCES irmaos(id),
+            presente BOOLEAN NOT NULL DEFAULT TRUE,
+            observacao TEXT,
+            registrado_por INT REFERENCES usuarios(id),
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(loja_id, data, irmao_id))""",
+        "CREATE INDEX IF NOT EXISTS idx_presencas_loja_data ON presencas(loja_id, data)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -1578,6 +1593,9 @@ class CreateIrmaoInput(BaseModel):
     mensalidade_categoria: Optional[str] = None
     mensalidade_valor: Optional[Decimal] = None
     cargo_loja: Optional[str] = None
+    grau: int = 1
+    status: str = "ativo"
+    data_elevacao: Optional[str] = None
 
 
 class SetMensalidadeInput(BaseModel):
@@ -1608,6 +1626,9 @@ def criar_irmao(
             filhos=[f.model_dump() for f in payload.filhos],
             mensalidade_categoria=payload.mensalidade_categoria,
             mensalidade_valor=payload.mensalidade_valor,
+            grau=payload.grau,
+            status=payload.status,
+            data_elevacao=payload.data_elevacao,
         )
     except DomainError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1813,6 +1834,132 @@ def historico_pagamentos(
             (irmao_id,),
         )
     return [dict(r) for r in rows]
+
+
+# ═══════════════════════════════════════════════════════════
+#  DASHBOARD
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/dashboard")
+def dashboard(
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    import datetime as _dt
+    loja_id = actor.loja_id
+    if not loja_id:
+        return {"total_irmaos": 0, "proximo_evento": None, "aniversariantes": [],
+                "inadimplentes": 0, "tarefas_pendentes": 0}
+    hoje = _dt.date.today()
+    comp = hoje.strftime("%Y-%m")
+    with db.transaction() as tx:
+        total = tx.fetch_one(
+            "SELECT COUNT(*) AS c FROM irmaos WHERE loja_id=%s AND status='ativo' AND deleted_at IS NULL",
+            (loja_id,),
+        )
+        proximo = tx.fetch_one(
+            """SELECT titulo, data, hora_inicio FROM agenda_eventos
+               WHERE loja_id=%s AND data >= %s ORDER BY data, hora_inicio LIMIT 1""",
+            (loja_id, hoje),
+        )
+        if not proximo:
+            # Fallback: próxima sessão recorrente
+            sessoes = tx.fetch_all(
+                "SELECT nome, dia_semana, hora_inicio FROM agenda_sessoes WHERE loja_id=%s AND ativo=TRUE",
+                (loja_id,),
+            )
+            if sessoes:
+                melhor = None
+                for s in sessoes:
+                    dw = s["dia_semana"]
+                    days_ahead = (dw - hoje.weekday()) % 7 or 7
+                    d = hoje + _dt.timedelta(days=days_ahead)
+                    if melhor is None or d < melhor["data"]:
+                        melhor = {"titulo": s["nome"], "data": d, "hora_inicio": str(s["hora_inicio"])}
+                proximo = melhor
+        aniv = tx.fetch_all(
+            """SELECT nome, data_nascimento FROM irmaos
+               WHERE loja_id=%s AND status='ativo' AND deleted_at IS NULL
+                 AND EXTRACT(MONTH FROM data_nascimento) = %s
+               ORDER BY EXTRACT(DAY FROM data_nascimento)""",
+            (loja_id, hoje.month),
+        )
+        inadimplentes = tx.fetch_one(
+            """SELECT COUNT(*) AS c FROM irmaos i
+               WHERE i.loja_id=%s AND i.status='ativo' AND i.deleted_at IS NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM pagamentos_mensalidade pm
+                     WHERE pm.irmao_id=i.id AND pm.competencia=%s)""",
+            (loja_id, comp),
+        )
+        tarefas = tx.fetch_one(
+            """SELECT COUNT(*) AS c FROM tarefas
+               WHERE loja_id=%s AND status IN ('pendente','em_andamento') AND deleted_at IS NULL""",
+            (loja_id,),
+        )
+    return {
+        "total_irmaos":    int(total["c"]) if total else 0,
+        "proximo_evento":  dict(proximo) if proximo else None,
+        "aniversariantes": [dict(a) for a in aniv],
+        "inadimplentes":   int(inadimplentes["c"]) if inadimplentes else 0,
+        "tarefas_pendentes": int(tarefas["c"]) if tarefas else 0,
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+#  PRESENÇAS
+# ═══════════════════════════════════════════════════════════
+
+class PresencaItem(BaseModel):
+    irmao_id: int
+    presente: bool
+    observacao: Optional[str] = None
+
+
+class RegistrarPresencasInput(BaseModel):
+    loja_id: int
+    data: str   # YYYY-MM-DD
+    presencas: list[PresencaItem]
+
+
+@app.get("/presencas")
+def listar_presencas(
+    loja_id: int = Query(...),
+    data: str = Query(...),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        rows = tx.fetch_all(
+            """SELECT i.id, i.nome, i.cim, i.grau, i.cargo_loja,
+                      p.id AS presenca_id, p.presente, p.observacao
+               FROM irmaos i
+               LEFT JOIN presencas p ON p.irmao_id = i.id AND p.loja_id = %s AND p.data = %s
+               WHERE i.loja_id = %s AND i.status = 'ativo' AND i.deleted_at IS NULL
+               ORDER BY i.nome""",
+            (loja_id, data, loja_id),
+        )
+    return [dict(r) for r in rows]
+
+
+@app.post("/presencas/registrar", status_code=201)
+def registrar_presencas(
+    payload: RegistrarPresencasInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        for p in payload.presencas:
+            tx.execute(
+                """INSERT INTO presencas (loja_id, data, irmao_id, presente, observacao, registrado_por)
+                   VALUES (%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (loja_id, data, irmao_id)
+                   DO UPDATE SET presente=%s, observacao=%s, registrado_por=%s""",
+                (payload.loja_id, payload.data, p.irmao_id, p.presente,
+                 p.observacao, actor.user_id,
+                 p.presente, p.observacao, actor.user_id),
+            )
+    return {"status": "ok"}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2567,11 +2714,12 @@ def atualizar_irmao(
         tx.execute(
             """UPDATE irmaos SET nome=%s, telefone=%s, cim=%s, potencia=%s,
                data_nascimento=%s, nome_esposa=%s, data_nascimento_esposa=%s,
-               cargo_loja=%s
+               cargo_loja=%s, grau=%s, status=%s, data_elevacao=%s
                WHERE id=%s""",
             (payload.nome, payload.telefone, payload.cim, payload.potencia,
              payload.data_nascimento, payload.nome_esposa, payload.data_nascimento_esposa,
-             payload.cargo_loja or None, irmao_id),
+             payload.cargo_loja or None, payload.grau, payload.status,
+             payload.data_elevacao or None, irmao_id),
         )
         if payload.filhos:
             tx.execute("DELETE FROM irmaos_filhos WHERE irmao_id=%s", (irmao_id,))

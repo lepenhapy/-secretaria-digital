@@ -565,6 +565,9 @@ function renderSidebar() {
     <div class="sidebar-nav-module" id="nav-agenda" onclick="abrirModulo('agenda')">
       <span style="font-size:15px">📅</span><span>Agenda</span>
     </div>
+    <div class="sidebar-nav-module" id="nav-presencas" onclick="abrirModulo('presencas')">
+      <span style="font-size:15px">✅</span><span>Presenças</span>
+    </div>
     <div class="sidebar-nav-module" id="nav-mensalidades" onclick="abrirModulo('mensalidades')">
       <span style="font-size:15px">💰</span><span>Mensalidades</span>
     </div>
@@ -643,6 +646,7 @@ function abrirModulo(id) {
     boletos:        () => { mostrarView('irmaoView');     renderBoletosView(); },
     aniversarios:   () => { mostrarView('irmaoView');     renderAniversariosView(); },
     agenda:         () => { mostrarView('agendaView');    renderAgendaView(); },
+    presencas:      () => { mostrarView('irmaoView');     renderPresencasView(); },
     compras:        () => { mostrarView('comprasView');    renderComprasView(); },
     rateio:         () => { mostrarView('rateioView');     renderRateioView(); },
     relatorios:     () => { mostrarView('relatoriosView'); renderRelatoriosView(); },
@@ -748,7 +752,7 @@ function renderFuncionalidades(cargo) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  HOME VIEW
+//  HOME VIEW — DASHBOARD
 // ═══════════════════════════════════════════════════════════
 
 function renderHome() {
@@ -760,11 +764,86 @@ function renderHome() {
       <div class="card-nivel"><span>Nível ${c.nivel}</span></div>
     </div>
   `).join('');
+  carregarDashboard();
+}
+
+async function carregarDashboard() {
+  const hero = document.querySelector('.home-hero');
+  if (!hero || !state.usuario?.loja_id) return;
+  try {
+    const d = await api('GET', '/dashboard');
+    const anivHtml = d.aniversariantes?.length
+      ? d.aniversariantes.slice(0,5).map(a =>
+          `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f1f5f9">
+            <span>🎂</span>
+            <div style="font-size:13px"><strong>${a.nome}</strong>
+              ${a.data_nascimento?`<span style="color:#94a3b8;font-size:11px"> · dia ${a.data_nascimento.split('-')[2]}</span>`:''}
+            </div>
+          </div>`).join('')
+      : '<div style="color:#94a3b8;font-size:13px">Nenhum este mês.</div>';
+
+    const proxHtml = d.proximo_evento
+      ? `<div style="font-size:14px;font-weight:600">${d.proximo_evento.titulo}</div>
+         <div style="font-size:12px;color:#64748b;margin-top:2px">${formatData(d.proximo_evento.data)}${d.proximo_evento.hora_inicio ? ' · ' + String(d.proximo_evento.hora_inicio).substring(0,5) : ''}</div>`
+      : '<div style="color:#94a3b8;font-size:13px">Nenhum evento próximo.</div>';
+
+    hero.insertAdjacentHTML('afterend', `
+      <div id="dashboardPanel" style="margin-bottom:24px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">
+          <div class="form-card" style="text-align:center;padding:18px 12px;cursor:pointer" onclick="abrirModulo('cadastro_irmao')">
+            <div style="font-size:30px;font-weight:700;color:#2563eb">${d.total_irmaos}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:3px">Irmãos Ativos</div>
+          </div>
+          <div class="form-card" style="text-align:center;padding:18px 12px;cursor:pointer" onclick="abrirModulo('mensalidades')">
+            <div style="font-size:30px;font-weight:700;color:${d.inadimplentes>0?'#dc2626':'#16a34a'}">${d.inadimplentes}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:3px">Mensalidades em Atraso</div>
+          </div>
+          <div class="form-card" style="text-align:center;padding:18px 12px;cursor:pointer" onclick="abrirModulo('tarefas')">
+            <div style="font-size:30px;font-weight:700;color:${d.tarefas_pendentes>0?'#f59e0b':'#16a34a'}">${d.tarefas_pendentes}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:3px">Tarefas Pendentes</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-card">
+            <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:10px">📅 Próximo Evento</div>
+            ${proxHtml}
+          </div>
+          <div class="form-card">
+            <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:10px">🎂 Aniversariantes do Mês</div>
+            ${anivHtml}
+          </div>
+        </div>
+      </div>
+    `);
+  } catch(_) {}
 }
 
 // ═══════════════════════════════════════════════════════════
 //  MÓDULO — CADASTRO DE IRMÃOS
 // ═══════════════════════════════════════════════════════════
+
+const GRAUS = [
+  { v: 1, label: '1° Aprendiz',    cor: '#3b82f6', bg: '#eff6ff' },
+  { v: 2, label: '2° Companheiro', cor: '#16a34a', bg: '#f0fdf4' },
+  { v: 3, label: '3° Mestre',      cor: '#b45309', bg: '#fffbeb' },
+];
+const STATUS_IRMAO = [
+  { v: 'ativo',      label: 'Ativo',      cor: '#16a34a', bg: '#f0fdf4' },
+  { v: 'irregular',  label: 'Irregular',  cor: '#d97706', bg: '#fffbeb' },
+  { v: 'licenca',    label: 'Licença',    cor: '#0891b2', bg: '#f0f9ff' },
+  { v: 'suspenso',   label: 'Suspenso',   cor: '#dc2626', bg: '#fef2f2' },
+  { v: 'falecido',   label: 'Falecido',   cor: '#6b7280', bg: '#f9fafb' },
+];
+function tagGrau(g) {
+  const gr = GRAUS.find(x => x.v == g) || GRAUS[0];
+  return `<span style="background:${gr.bg};color:${gr.cor};border:1px solid ${gr.cor}33;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${gr.label}</span>`;
+}
+function tagStatus(s) {
+  if (!s || s === 'ativo') return '';
+  const st = STATUS_IRMAO.find(x => x.v === s);
+  if (!st) return '';
+  return `<span style="background:${st.bg};color:${st.cor};border:1px solid ${st.cor}33;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${st.label}</span>`;
+}
 
 // Cargos da loja para o cadastro de irmãos
 const CARGOS_LOJA_OPCOES = [
@@ -819,8 +898,11 @@ async function renderIrmaoView() {
 
   let irmaos = [];
   try { irmaos = await api('GET', `/irmaos?loja_id=${loja}`); } catch(_) {}
+  _todosIrmaos = irmaos;
+  _filtroStatus = 'ativo';
+  _irmaoPage = 0;
 
-  const irmaoCards = irmaos.map(ir => {
+  const irmaoCards = irmaos.filter(ir => (ir.status||'ativo') === 'ativo').map(ir => {
     // normalise field names from API
     ir.filhos = ir.filhos || [];
     ir.tel = ir.telefone || ir.whatsapp || '';
@@ -834,22 +916,23 @@ async function renderIrmaoView() {
       <div class="irmao-card" onclick="abrirIrmao(${ir.id})" style="cursor:pointer" title="Ver perfil completo">
         <div class="irmao-card-top">
           <div class="irmao-avatar">${ini}</div>
-          <div>
+          <div style="flex:1;min-width:0">
             <div class="irmao-card-name">${ir.nome}</div>
             <div class="irmao-card-cim">CIM ${ir.cim || '—'} &nbsp;·&nbsp; ${ir.potencia || '—'}</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+              ${tagGrau(ir.grau)}
+              ${tagStatus(ir.status)}
+            </div>
           </div>
         </div>
         <div class="irmao-card-body">
           ${ir.cargo_loja ? `<div>⚒️ <strong>Cargo:</strong> ${ir.cargo_loja}</div>` : ''}
           <div>📱 <strong>WhatsApp:</strong> ${ir.tel || '—'}</div>
           <div>🎂 <strong>Nascimento:</strong> ${formatData(ir.nascimento)}</div>
-          <div>💍 <strong>Esposa:</strong> ${ir.esposa || '—'}</div>
-          <div>👶 <strong>Filhos:</strong> ${filhosHtml}</div>
         </div>
         <div class="irmao-card-tags">
           ${tagMensalidade(ir.mensalidade_categoria || ir.mensalidade)}
           ${anivProximo(ir.nascimento) ? '<span class="tag tag-aniv">🎂 Aniversário próximo</span>' : ''}
-          <span class="tag" style="background:#f0f9ff;color:#0369a1;border-color:#bae6fd;margin-top:4px">Ver perfil →</span>
         </div>
         <div class="irmao-card-actions" onclick="event.stopPropagation()">
           <button class="func-btn neutral" onclick="editarIrmao(${ir.id})">✏ Editar</button>
@@ -910,6 +993,16 @@ async function renderIrmaoView() {
           </select>
         </div>
         <div class="form-group">
+          <label class="form-label">Grau Maçônico</label>
+          <select class="form-select" id="fi_grau">
+            ${GRAUS.map(g => `<option value="${g.v}">${g.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Data de Elevação</label>
+          <input class="form-input" id="fi_elevacao" type="date" />
+        </div>
+        <div class="form-group">
           <label class="form-label">Regra de Mensalidade</label>
           <select class="form-select" id="fi_mensalidade">
             ${_categoriasMensalidade.length
@@ -938,10 +1031,96 @@ async function renderIrmaoView() {
       <div class="mensalidade-categorias">${categoriaCards}</div>
     </div>
 
-    <!-- Cards dos irmãos -->
-    <div class="section-title" style="margin-bottom:16px">Irmãos cadastrados (${irmaos.length})</div>
-    <div class="irmao-grid">${irmaoCards}</div>
+    <!-- Busca + filtro -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <input class="form-input" id="irmaoSearch" type="search" placeholder="Buscar por nome ou CIM…"
+        style="flex:1;min-width:180px;max-width:320px"
+        oninput="filtrarIrmaos()" />
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        ${['todos','ativo','irregular','licenca','suspenso','falecido'].map(s => `
+          <button class="relat-tab${s==='ativo'?' active':''}" id="filtro-${s}"
+            onclick="setFiltroStatus('${s}')">${s==='todos'?'Todos':STATUS_IRMAO.find(x=>x.v===s)?.label||s}</button>`).join('')}
+      </div>
+    </div>
+    <div class="section-title" style="margin-bottom:16px" id="irmaoContador">Irmãos cadastrados (${irmaos.length})</div>
+    <div class="irmao-grid" id="irmaoGrid">${irmaoCards}</div>
+    <div id="irmaoPaginator" style="display:flex;justify-content:center;gap:8px;margin-top:16px;flex-wrap:wrap"></div>
   `;
+}
+
+let _todosIrmaos = [];
+let _filtroStatus = 'ativo';
+let _irmaoPage = 0;
+const _PER_PAGE = 20;
+
+function setFiltroStatus(s) {
+  _filtroStatus = s;
+  _irmaoPage = 0;
+  document.querySelectorAll('[id^="filtro-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('filtro-' + s)?.classList.add('active');
+  renderIrmaoGrid();
+}
+
+function filtrarIrmaos() {
+  _irmaoPage = 0;
+  renderIrmaoGrid();
+}
+
+function renderIrmaoGrid() {
+  const q = (document.getElementById('irmaoSearch')?.value || '').toLowerCase();
+  const filtered = _todosIrmaos.filter(ir => {
+    const statusOk = _filtroStatus === 'todos' || (ir.status || 'ativo') === _filtroStatus;
+    const searchOk = !q || ir.nome.toLowerCase().includes(q) || (ir.cim || '').toLowerCase().includes(q);
+    return statusOk && searchOk;
+  });
+  const total = filtered.length;
+  const pages = Math.ceil(total / _PER_PAGE);
+  const slice = filtered.slice(_irmaoPage * _PER_PAGE, (_irmaoPage + 1) * _PER_PAGE);
+
+  const grid = document.getElementById('irmaoGrid');
+  const contador = document.getElementById('irmaoContador');
+  const paginator = document.getElementById('irmaoPaginator');
+  if (!grid) return;
+
+  contador.textContent = `Irmãos encontrados (${total})`;
+  grid.innerHTML = slice.map(ir => {
+    ir.filhos = ir.filhos || [];
+    ir.tel = ir.telefone || '';
+    ir.nascimento = ir.data_nascimento || '';
+    const ini = ir.nome[0].toUpperCase();
+    return `
+      <div class="irmao-card" onclick="abrirIrmao(${ir.id})" style="cursor:pointer">
+        <div class="irmao-card-top">
+          <div class="irmao-avatar">${ini}</div>
+          <div style="flex:1;min-width:0">
+            <div class="irmao-card-name">${ir.nome}</div>
+            <div class="irmao-card-cim">CIM ${ir.cim || '—'} &nbsp;·&nbsp; ${ir.potencia || '—'}</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+              ${tagGrau(ir.grau)} ${tagStatus(ir.status)}
+            </div>
+          </div>
+        </div>
+        <div class="irmao-card-body">
+          ${ir.cargo_loja ? `<div>⚒️ <strong>Cargo:</strong> ${ir.cargo_loja}</div>` : ''}
+          <div>📱 ${ir.tel || '—'}</div>
+          <div>🎂 ${formatData(ir.nascimento)}</div>
+        </div>
+        <div class="irmao-card-tags">
+          ${tagMensalidade(ir.mensalidade_categoria)}
+          ${anivProximo(ir.nascimento) ? '<span class="tag tag-aniv">🎂 Próx.</span>' : ''}
+        </div>
+        <div class="irmao-card-actions" onclick="event.stopPropagation()">
+          <button class="func-btn neutral" onclick="editarIrmao(${ir.id})">✏ Editar</button>
+          <button class="func-btn danger"  onclick="excluirIrmao(${ir.id})">🗑</button>
+        </div>
+      </div>`;
+  }).join('') || '<div style="color:#94a3b8;padding:24px;text-align:center">Nenhum irmão encontrado.</div>';
+
+  paginator.innerHTML = pages > 1
+    ? `${_irmaoPage > 0 ? `<button class="func-btn neutral" onclick="_irmaoPage--;renderIrmaoGrid()">← Anterior</button>` : ''}
+       <span style="font-size:13px;color:#64748b;align-self:center">Página ${_irmaoPage+1} de ${pages}</span>
+       ${_irmaoPage < pages-1 ? `<button class="func-btn neutral" onclick="_irmaoPage++;renderIrmaoGrid()">Próximo →</button>` : ''}`
+    : '';
 }
 
 function toggleFormIrmao() {
@@ -974,6 +1153,8 @@ async function salvarIrmao() {
     nome_esposa:          document.getElementById('fi_esposa').value.trim() || null,
     mensalidade_categoria: document.getElementById('fi_mensalidade').value || null,
     cargo_loja:           document.getElementById('fi_cargo_loja').value || null,
+    grau:                 parseInt(document.getElementById('fi_grau').value) || 1,
+    data_elevacao:        document.getElementById('fi_elevacao').value || null,
     filhos,
   };
 
@@ -1027,9 +1208,19 @@ async function editarIrmao(id) {
       <div class="form-group" style="grid-column:1/-1"><label>Nome da Esposa</label>
         <input class="modal-input" id="ei_esposa" value="${ir.nome_esposa||''}" /></div>
       ${lojaField}
+      <div class="form-group"><label>Grau Maçônico</label>
+        <select class="modal-input" id="ei_grau">
+          ${GRAUS.map(g => `<option value="${g.v}" ${(ir.grau||1)==g.v?'selected':''}>${g.label}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>Data de Elevação</label>
+        <input class="modal-input" type="date" id="ei_elevacao" value="${ir.data_elevacao||''}" /></div>
       <div class="form-group"><label>Cargo / Função na Loja</label>
         <select class="modal-input" id="ei_cargo_loja">
           ${CARGOS_LOJA_OPCOES.map(c => `<option value="${c}" ${(ir.cargo_loja||'')===c?'selected':''}>${c||'— sem cargo —'}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label>Status</label>
+        <select class="modal-input" id="ei_status">
+          ${STATUS_IRMAO.map(s => `<option value="${s.v}" ${(ir.status||'ativo')===s.v?'selected':''}>${s.label}</option>`).join('')}
         </select></div>
       <div class="form-group" style="grid-column:1/-1"><label>Filhos (nome / data — um por linha)</label>
         <textarea class="modal-input" id="ei_filhos" rows="3">${filhosStr}</textarea></div>
@@ -1059,6 +1250,9 @@ async function salvarEdicaoIrmao(id) {
     data_nascimento:   document.getElementById('ei_nasc').value||null,
     nome_esposa:       document.getElementById('ei_esposa').value.trim()||null,
     cargo_loja:        document.getElementById('ei_cargo_loja').value||null,
+    grau:              parseInt(document.getElementById('ei_grau')?.value)||1,
+    status:            document.getElementById('ei_status')?.value||'ativo',
+    data_elevacao:     document.getElementById('ei_elevacao')?.value||null,
     filhos,
   };
   try {
@@ -1089,6 +1283,152 @@ function anivProximo(iso) {
   const prox = new Date(hoje.getFullYear(), mes - 1, dia);
   if (prox < hoje) prox.setFullYear(hoje.getFullYear() + 1);
   return (prox - hoje) / 86400000 <= 30;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MÓDULO — PRESENÇAS
+// ═══════════════════════════════════════════════════════════
+
+function renderPresencasView() {
+  const view = document.getElementById('irmaoView');
+  const hoje = new Date().toISOString().split('T')[0];
+  view.innerHTML = `
+    <div class="irmao-header"><h1>✅ Presenças</h1></div>
+    <div class="form-card" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Data da Sessão</label>
+        <input class="form-input" id="pres_data" type="date" value="${hoje}" style="width:180px" />
+      </div>
+      <button class="func-btn primary" onclick="carregarPresencas()">Carregar</button>
+    </div>
+    <div id="presStats" style="display:none;margin-bottom:4px">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px" id="presStatCards"></div>
+    </div>
+    <div id="presLista"></div>
+  `;
+  carregarPresencas();
+}
+
+let _presencasState = {};
+
+async function carregarPresencas() {
+  const loja = state.usuario?.loja_id || 1;
+  const data = document.getElementById('pres_data')?.value || '';
+  const lista = document.getElementById('presLista');
+  const stats = document.getElementById('presStats');
+  if (!lista || !data) return;
+  lista.innerHTML = '<div class="loading">Carregando…</div>';
+  try {
+    const rows = await api('GET', `/presencas?loja_id=${loja}&data=${data}`);
+    _presencasState = {};
+    rows.forEach(r => {
+      _presencasState[r.id] = r.presente !== null ? r.presente : true;
+    });
+
+    const jaRegistrado = rows.some(r => r.presenca_id !== null);
+    const presentes = rows.filter(r => r.presente === true).length;
+    const ausentes  = rows.filter(r => r.presente === false).length;
+    const total     = rows.length;
+
+    stats.style.display = 'block';
+    document.getElementById('presStatCards').innerHTML = `
+      <div class="form-card" style="padding:14px 18px;display:inline-flex;align-items:center;gap:10px">
+        <span style="font-size:22px;font-weight:700;color:#2563eb">${total}</span>
+        <span style="font-size:13px;color:#64748b">Total</span>
+      </div>
+      <div class="form-card" style="padding:14px 18px;display:inline-flex;align-items:center;gap:10px">
+        <span style="font-size:22px;font-weight:700;color:#16a34a">${presentes}</span>
+        <span style="font-size:13px;color:#64748b">Presentes</span>
+      </div>
+      <div class="form-card" style="padding:14px 18px;display:inline-flex;align-items:center;gap:10px">
+        <span style="font-size:22px;font-weight:700;color:#dc2626">${ausentes}</span>
+        <span style="font-size:13px;color:#64748b">Ausentes</span>
+      </div>
+    `;
+
+    const podeEditar = ['admin_principal','veneravel_mestre','secretario','financeiro'].includes(state.usuario?.cargo);
+    if (!rows.length) {
+      lista.innerHTML = '<div class="form-card" style="color:#64748b;text-align:center;padding:24px">Nenhum irmão ativo cadastrado.</div>';
+      return;
+    }
+
+    lista.innerHTML = `
+      <div class="form-card" style="padding:0 0 12px">
+        ${podeEditar ? `<div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px 0">
+          <button class="func-btn neutral" onclick="marcarTodosPresentes()">✓ Todos presentes</button>
+          <button class="func-btn primary"  onclick="salvarPresencas()">Salvar lista</button>
+        </div>` : ''}
+        <div style="padding:0 8px">
+          ${rows.map(r => `
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 8px;border-bottom:1px solid #f1f5f9">
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:600;font-size:14px">${r.nome}</div>
+                <div style="font-size:12px;color:#64748b">${r.cim?'CIM '+r.cim+' · ':''} ${r.cargo_loja||''} ${tagGrau(r.grau)}</div>
+              </div>
+              ${podeEditar ? `
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none">
+                <input type="checkbox" id="pres_${r.id}"
+                  ${_presencasState[r.id] !== false ? 'checked' : ''}
+                  onchange="_presencasState[${r.id}]=this.checked;_atualizarPresStats()"
+                  style="width:18px;height:18px;accent-color:#2563eb;cursor:pointer" />
+                <span style="font-size:13px;color:#374151" id="pres_label_${r.id}">
+                  ${_presencasState[r.id] !== false ? 'Presente' : 'Ausente'}
+                </span>
+              </label>` : `
+              <span style="${r.presente===true?'color:#16a34a':r.presente===false?'color:#dc2626':'color:#94a3b8'};font-size:13px;font-weight:600">
+                ${r.presente===true?'✓ Presente':r.presente===false?'✗ Ausente':'—'}
+              </span>`}
+            </div>`).join('')}
+        </div>
+      </div>
+    `;
+    if (podeEditar) _atualizarPresStats();
+  } catch(e) {
+    lista.innerHTML = `<div class="form-card" style="color:#dc2626;padding:20px">Erro: ${e.message}</div>`;
+  }
+}
+
+function _atualizarPresStats() {
+  const total = Object.keys(_presencasState).length;
+  const presentes = Object.values(_presencasState).filter(Boolean).length;
+  const ausentes  = total - presentes;
+  document.querySelectorAll('#presStatCards .form-card span:first-child').forEach((el,i) => {
+    if (i===0) el.textContent = total;
+    if (i===2) el.textContent = presentes;
+    if (i===4) el.textContent = ausentes;
+  });
+  Object.keys(_presencasState).forEach(id => {
+    const lbl = document.getElementById('pres_label_'+id);
+    if (lbl) lbl.textContent = _presencasState[id] ? 'Presente' : 'Ausente';
+  });
+}
+
+function marcarTodosPresentes() {
+  Object.keys(_presencasState).forEach(id => {
+    _presencasState[id] = true;
+    const cb = document.getElementById('pres_'+id);
+    if (cb) cb.checked = true;
+  });
+  _atualizarPresStats();
+}
+
+async function salvarPresencas() {
+  const loja = state.usuario?.loja_id || 1;
+  const data = document.getElementById('pres_data')?.value || '';
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Salvando…';
+  try {
+    const presencas = Object.entries(_presencasState).map(([irmao_id, presente]) =>
+      ({ irmao_id: parseInt(irmao_id), presente })
+    );
+    await api('POST', '/presencas/registrar', { loja_id: loja, data, presencas });
+    btn.textContent = '✓ Salvo!';
+    btn.style.background = '#16a34a';
+    setTimeout(() => { btn.disabled=false; btn.textContent='Salvar lista'; btn.style.background=''; carregarPresencas(); }, 1800);
+  } catch(e) {
+    btn.disabled=false; btn.textContent='Salvar lista';
+    alert('Erro: ' + e.message);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1776,9 +2116,12 @@ function renderIrmaoDetalhe(ir) {
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             ${ir.cim ? `<span class="tag tag-regular">CIM ${ir.cim}</span>` : ''}
             ${ir.potencia ? `<span class="tag tag-regular">${ir.potencia}</span>` : ''}
+            ${tagGrau(ir.grau)}
+            ${tagStatus(ir.status)}
             ${cargo ? `<span class="tag" style="background:${cargo.cor}18;color:${cargo.cor};border-color:${cargo.cor}33">${cargo.icone} ${cargo.label}</span>` : ir.cargo ? `<span class="tag tag-regular">${ir.cargo}</span>` : ''}
             ${ir.cargo_loja ? `<span class="tag" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0">🏛️ ${ir.cargo_loja}</span>` : ''}
           </div>
+          ${ir.data_elevacao ? `<div style="font-size:12px;color:#64748b;margin-top:6px">Elevado ao 3° grau em ${formatData(ir.data_elevacao)}</div>` : ''}
         </div>
       </div>
 

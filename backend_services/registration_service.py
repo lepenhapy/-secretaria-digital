@@ -76,18 +76,23 @@ class RegistrationService:
         filhos: Optional[list],
         mensalidade_categoria: Optional[str],
         mensalidade_valor: Optional[Decimal],
+        grau: int = 1,
+        status: str = "ativo",
+        data_elevacao: Optional[str] = None,
     ) -> int:
         with self.db.transaction() as tx:
             row = tx.fetch_one(
                 """
                 insert into irmaos
                   (loja_id, nome, telefone, cim, potencia,
-                   data_nascimento, nome_esposa, data_nascimento_esposa)
-                values (%s, %s, %s, %s, %s, %s, %s, %s)
+                   data_nascimento, nome_esposa, data_nascimento_esposa,
+                   grau, status, data_elevacao)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 returning id
                 """,
                 [loja_id, nome, telefone, cim, potencia,
-                 data_nascimento or None, nome_esposa, data_nascimento_esposa or None],
+                 data_nascimento or None, nome_esposa, data_nascimento_esposa or None,
+                 grau, status, data_elevacao or None],
             )
             irmao_id = row["id"]
 
@@ -115,7 +120,7 @@ class RegistrationService:
                 """
                 select i.id, i.nome, i.telefone, i.cim, i.potencia,
                        i.data_nascimento, i.nome_esposa, i.data_nascimento_esposa,
-                       i.status, i.created_at, i.cargo_loja,
+                       i.status, i.grau, i.data_elevacao, i.created_at, i.cargo_loja,
                        rm.categoria as mensalidade_categoria,
                        rm.valor     as mensalidade_valor
                 from irmaos i
