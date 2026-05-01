@@ -565,6 +565,9 @@ function renderSidebar() {
     <div class="sidebar-nav-module" id="nav-agenda" onclick="abrirModulo('agenda')">
       <span style="font-size:15px">📅</span><span>Agenda</span>
     </div>
+    <div class="sidebar-nav-module" id="nav-mensalidades" onclick="abrirModulo('mensalidades')">
+      <span style="font-size:15px">💰</span><span>Mensalidades</span>
+    </div>
     <div class="sidebar-nav-module" id="nav-compras" onclick="abrirModulo('compras')">
       <span style="font-size:15px">🧾</span><span>Compras / Reembolsos</span>
     </div>
@@ -636,6 +639,7 @@ function abrirModulo(id) {
 
   const handlers = {
     cadastro_irmao: () => { mostrarView('irmaoView');     renderIrmaoView(); },
+    mensalidades:   () => { mostrarView('irmaoView');     renderMensalidadesView(); },
     boletos:        () => { mostrarView('irmaoView');     renderBoletosView(); },
     aniversarios:   () => { mostrarView('irmaoView');     renderAniversariosView(); },
     agenda:         () => { mostrarView('agendaView');    renderAgendaView(); },
@@ -1088,6 +1092,137 @@ function anivProximo(iso) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  MÓDULO — MENSALIDADES
+// ═══════════════════════════════════════════════════════════
+
+function renderMensalidadesView() {
+  const view = document.getElementById('irmaoView');
+  const hoje = new Date();
+  const compAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  view.innerHTML = `
+    <div class="irmao-header">
+      <h1>💰 Mensalidades</h1>
+    </div>
+    <div class="form-card" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Competência (mês)</label>
+        <input class="form-input" id="mens_comp" type="month" value="${compAtual}" style="width:160px" />
+      </div>
+      <button class="func-btn primary" onclick="carregarMensalidades()">Carregar</button>
+    </div>
+    <div id="mensStats" style="display:none;margin-bottom:12px">
+      <div class="cards-grid" id="mensStatsCards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px"></div>
+    </div>
+    <div id="mensLista" style="margin-top:4px"></div>
+  `;
+  carregarMensalidades();
+}
+
+async function carregarMensalidades() {
+  const loja  = state.usuario?.loja_id || 1;
+  const comp  = document.getElementById('mens_comp')?.value || '';
+  const lista = document.getElementById('mensLista');
+  const stats = document.getElementById('mensStats');
+  if (!lista) return;
+  lista.innerHTML = '<div class="loading">Carregando…</div>';
+  try {
+    const rows = await api('GET', `/mensalidades/status?loja_id=${loja}&competencia=${comp}`);
+    const total      = rows.length;
+    const pagos      = rows.filter(r => r.pagamento_id).length;
+    const pendentes  = total - pagos;
+    const arrecadado = rows.filter(r => r.pagamento_id).reduce((s,r) => s + Number(r.valor_pago||0), 0);
+    const esperado   = rows.reduce((s,r) => s + Number(r.valor||0), 0);
+
+    stats.style.display = 'block';
+    document.getElementById('mensStatsCards').innerHTML = `
+      <div class="form-card" style="text-align:center;padding:16px 12px">
+        <div style="font-size:28px;font-weight:700;color:#2563eb">${total}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">Total de Irmãos</div>
+      </div>
+      <div class="form-card" style="text-align:center;padding:16px 12px">
+        <div style="font-size:28px;font-weight:700;color:#16a34a">${pagos}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">Pagos</div>
+      </div>
+      <div class="form-card" style="text-align:center;padding:16px 12px">
+        <div style="font-size:28px;font-weight:700;color:#dc2626">${pendentes}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">Pendentes</div>
+      </div>
+      <div class="form-card" style="text-align:center;padding:16px 12px">
+        <div style="font-size:22px;font-weight:700;color:#0891b2">R$ ${arrecadado.toFixed(2)}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">Arrecadado / R$ ${esperado.toFixed(2)}</div>
+      </div>
+    `;
+
+    const podeMarcar = ['admin_principal','financeiro','veneravel_mestre','secretario'].includes(state.usuario?.cargo);
+    if (!rows.length) {
+      lista.innerHTML = '<div class="form-card" style="color:#64748b;text-align:center;padding:24px">Nenhum irmão ativo encontrado.</div>';
+      return;
+    }
+    lista.innerHTML = `
+      <div class="form-card" style="padding:0;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+              <th style="padding:10px 14px;text-align:left;font-weight:600">Irmão</th>
+              <th style="padding:10px 14px;text-align:left;font-weight:600">Categoria</th>
+              <th style="padding:10px 14px;text-align:right;font-weight:600">Valor</th>
+              <th style="padding:10px 14px;text-align:center;font-weight:600">Status</th>
+              ${podeMarcar ? '<th style="padding:10px 14px;text-align:center;font-weight:600">Ação</th>' : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr style="border-bottom:1px solid #f1f5f9">
+                <td style="padding:10px 14px">
+                  <div style="font-weight:600">${r.nome}</div>
+                  ${r.cim ? `<div style="font-size:11px;color:#94a3b8">CIM ${r.cim}</div>` : ''}
+                  ${r.cargo_loja ? `<div style="font-size:11px;color:#64748b">${r.cargo_loja}</div>` : ''}
+                </td>
+                <td style="padding:10px 14px;color:#64748b">${r.categoria || '—'}</td>
+                <td style="padding:10px 14px;text-align:right">${r.valor ? 'R$ '+Number(r.valor).toFixed(2) : '—'}</td>
+                <td style="padding:10px 14px;text-align:center">
+                  ${r.pagamento_id
+                    ? `<span style="background:#dcfce7;color:#16a34a;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600">✓ Pago</span>`
+                    : `<span style="background:#fee2e2;color:#dc2626;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600">Pendente</span>`
+                  }
+                  ${r.pagamento_id && r.pago_em ? `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${new Date(r.pago_em).toLocaleDateString('pt-BR')}</div>` : ''}
+                </td>
+                ${podeMarcar ? `<td style="padding:10px 14px;text-align:center">
+                  ${r.pagamento_id
+                    ? `<button class="func-btn neutral" style="font-size:12px;padding:4px 10px" onclick="cancelarMensalidade(${r.pagamento_id})">Cancelar</button>`
+                    : `<button class="func-btn primary" style="font-size:12px;padding:4px 10px" onclick="marcarMensalidadePaga(${r.id},'${comp}',${r.valor||0})">Marcar pago</button>`
+                  }
+                </td>` : ''}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch(e) {
+    lista.innerHTML = `<div class="form-card" style="color:#dc2626;padding:20px">Erro: ${e.message}</div>`;
+  }
+}
+
+async function marcarMensalidadePaga(irmaoId, competencia, valor) {
+  const loja = state.usuario?.loja_id || 1;
+  try {
+    await api('POST', '/mensalidades/pagar', {
+      loja_id: loja, irmao_id: irmaoId,
+      competencia, valor: valor || undefined,
+    });
+    carregarMensalidades();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function cancelarMensalidade(pagamentoId) {
+  if (!confirm('Cancelar este pagamento?')) return;
+  try {
+    await api('DELETE', `/mensalidades/pagar/${pagamentoId}`);
+    carregarMensalidades();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  MÓDULO — BOLETOS
 // ═══════════════════════════════════════════════════════════
 
@@ -1112,7 +1247,7 @@ function renderBoletosView() {
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label">ID da Loja</label>
-          <input class="form-input" id="b_loja" type="number" value="1" />
+          <input class="form-input" id="b_loja" type="number" value="${state.usuario?.loja_id || 1}" />
         </div>
         <div class="form-group">
           <label class="form-label">Arquivo PDF</label>
@@ -1611,6 +1746,7 @@ function renderIrmaoDetalhe(ir) {
   const view = document.getElementById('irmaoDetalheView');
   const ini = (ir.nome || '?')[0].toUpperCase();
   const cargo = CARGOS.find(c => c.id === ir.cargo);
+  const podeMensalidade = ['admin_principal','financeiro','veneravel_mestre','secretario'].includes(state.usuario?.cargo);
 
   const filhosHtml = (ir.filhos || []).length
     ? (ir.filhos).map(f => `
@@ -1627,6 +1763,8 @@ function renderIrmaoDetalhe(ir) {
     ? ir.comissoes.map(c => `<span class="tag" style="background:#e0e7ff;color:#3730a3;border-color:#c7d2fe">${c.nome}${c.funcao?' · '+c.funcao:''}</span>`).join('')
     : '<span style="color:#94a3b8;font-size:13px">—</span>';
 
+  const today = new Date().toISOString().split('T')[0];
+
   view.innerHTML = `
     <div style="max-width:900px;margin:0 auto;padding:24px 16px">
       <button class="func-btn neutral" style="margin-bottom:20px" onclick="abrirModulo('cadastro_irmao')">← Voltar à lista</button>
@@ -1639,6 +1777,7 @@ function renderIrmaoDetalhe(ir) {
             ${ir.cim ? `<span class="tag tag-regular">CIM ${ir.cim}</span>` : ''}
             ${ir.potencia ? `<span class="tag tag-regular">${ir.potencia}</span>` : ''}
             ${cargo ? `<span class="tag" style="background:${cargo.cor}18;color:${cargo.cor};border-color:${cargo.cor}33">${cargo.icone} ${cargo.label}</span>` : ir.cargo ? `<span class="tag tag-regular">${ir.cargo}</span>` : ''}
+            ${ir.cargo_loja ? `<span class="tag" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0">🏛️ ${ir.cargo_loja}</span>` : ''}
           </div>
         </div>
       </div>
@@ -1660,7 +1799,10 @@ function renderIrmaoDetalhe(ir) {
         </div>
 
         <div class="form-card">
-          <h2>Mensalidade</h2>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <h2 style="margin:0">Mensalidade</h2>
+            ${podeMensalidade ? `<button class="func-btn primary" style="font-size:12px;padding:5px 12px" onclick="abrirModalMensalidade(${ir.id})">Definir regra</button>` : ''}
+          </div>
           ${ir.mensalidade ? `
             <div class="irmao-detalhe-campos">
               <div class="irmao-detalhe-campo"><span class="irmao-campo-label">Categoria</span><span>${ir.mensalidade.categoria}</span></div>
@@ -1674,8 +1816,103 @@ function renderIrmaoDetalhe(ir) {
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${comissoesHtml}</div>
         </div>
       </div>
+
+      <!-- Histórico de pagamentos -->
+      <div class="form-card" style="margin-top:16px">
+        <h2>Histórico de Pagamentos</h2>
+        <div id="historicoMensalidades" style="color:#64748b;font-size:13px;margin-top:8px">
+          <button class="func-btn neutral" onclick="carregarHistoricoMensalidades(${ir.id})">Carregar histórico</button>
+        </div>
+      </div>
     </div>
   `;
+}
+
+function abrirModalMensalidade(irmaoId) {
+  const today = new Date().toISOString().split('T')[0];
+  abrirModal('Definir Regra de Mensalidade', `
+    <div>
+      <div class="modal-label">Categoria</div>
+      <select class="modal-input" id="dm_cat">
+        <option value="regular">Regular</option>
+        <option value="fundador">Fundador</option>
+        <option value="honorario">Honorário</option>
+        <option value="isento">Isento</option>
+        <option value="contribuinte">Contribuinte</option>
+      </select>
+    </div>
+    <div>
+      <div class="modal-label">Valor (R$)</div>
+      <input class="modal-input" id="dm_valor" type="number" step="0.01" min="0" placeholder="0.00" />
+    </div>
+    <div>
+      <div class="modal-label">Vigência início</div>
+      <input class="modal-input" id="dm_inicio" type="date" value="${today}" />
+    </div>
+    <div>
+      <div class="modal-label">Vigência fim (opcional)</div>
+      <input class="modal-input" id="dm_fim" type="date" />
+    </div>
+    <div>
+      <div class="modal-label">Observação</div>
+      <input class="modal-input" id="dm_obs" type="text" placeholder="Opcional" />
+    </div>
+    <pre class="modal-result" id="dmResult" style="display:none"></pre>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar', cls: 'primary', action: `_salvarMensalidade(${irmaoId})` },
+  ]);
+}
+
+async function _salvarMensalidade(irmaoId) {
+  const res = document.getElementById('dmResult');
+  res.style.display = 'block'; res.className = 'modal-result'; res.textContent = 'Salvando…';
+  try {
+    await api('POST', `/irmaos/${irmaoId}/mensalidade`, {
+      categoria:       document.getElementById('dm_cat').value,
+      valor:           parseFloat(document.getElementById('dm_valor').value || '0'),
+      vigencia_inicio: document.getElementById('dm_inicio').value,
+      vigencia_fim:    document.getElementById('dm_fim').value || undefined,
+      observacao:      document.getElementById('dm_obs').value || undefined,
+    });
+    fecharModal();
+    abrirIrmao(irmaoId);
+  } catch(e) {
+    res.className = 'modal-result error'; res.textContent = e.message;
+  }
+}
+
+async function carregarHistoricoMensalidades(irmaoId) {
+  const el = document.getElementById('historicoMensalidades');
+  if (!el) return;
+  el.textContent = 'Carregando…';
+  try {
+    const rows = await api('GET', `/mensalidades/historico/${irmaoId}`);
+    if (!rows.length) { el.textContent = 'Nenhum pagamento registrado.'; return; }
+    el.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">
+            <th style="padding:8px 12px;text-align:left">Competência</th>
+            <th style="padding:8px 12px;text-align:right">Valor</th>
+            <th style="padding:8px 12px;text-align:left">Forma</th>
+            <th style="padding:8px 12px;text-align:left">Data</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr style="border-bottom:1px solid #f1f5f9">
+              <td style="padding:8px 12px;font-weight:600">${r.competencia}</td>
+              <td style="padding:8px 12px;text-align:right">R$ ${Number(r.valor).toFixed(2)}</td>
+              <td style="padding:8px 12px;color:#64748b">${r.forma_pagamento || '—'}</td>
+              <td style="padding:8px 12px;color:#64748b">${new Date(r.pago_em).toLocaleDateString('pt-BR')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch(e) {
+    el.innerHTML = `<span style="color:#dc2626">Erro: ${e.message}</span>`;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

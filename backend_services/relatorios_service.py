@@ -115,7 +115,7 @@ class RelatoriosService:
         where = " AND ".join(filters)
         with self.db.transaction() as tx:
             return tx.fetch_all(
-                f"""SELECT i.nome, i.cim, rm.categoria, rm.valor_mensal,
+                f"""SELECT i.nome, i.cim, rm.categoria, rm.valor,
                            rm.vigencia_inicio, rm.vigencia_fim
                     FROM regras_mensalidade rm
                     JOIN irmaos i ON i.id = rm.irmao_id

@@ -558,6 +558,21 @@ def _ensure_schema(db) -> None:
             UNIQUE(tenant_id, competencia))""",
         "CREATE INDEX IF NOT EXISTS idx_assinaturas_tenant_id ON assinaturas_saas(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_lojas_tenant_id ON lojas(tenant_id)",
+        # ── 030: pagamentos_mensalidade ───────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS pagamentos_mensalidade (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            irmao_id INT NOT NULL REFERENCES irmaos(id),
+            competencia VARCHAR(7) NOT NULL,
+            valor NUMERIC(10,2) NOT NULL DEFAULT 0,
+            pago_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            forma_pagamento VARCHAR(30),
+            observacao TEXT,
+            registrado_por INT REFERENCES usuarios(id),
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(irmao_id, competencia))""",
+        "CREATE INDEX IF NOT EXISTS idx_pag_mens_loja ON pagamentos_mensalidade(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pag_mens_comp ON pagamentos_mensalidade(competencia)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -1633,6 +1648,171 @@ def definir_mensalidade(
     except DomainError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "created", "regra_id": regra_id}
+
+
+# ═══════════════════════════════════════════════════════════
+#  MENSALIDADES — STATUS E PAGAMENTOS
+# ═══════════════════════════════════════════════════════════
+
+class DefinirMensalidadeInput(BaseModel):
+    categoria: str = "regular"
+    valor: Decimal
+    vigencia_inicio: str
+    vigencia_fim: Optional[str] = None
+    observacao: Optional[str] = None
+
+
+@app.post("/irmaos/{irmao_id}/mensalidade", status_code=201)
+def definir_mensalidade(
+    irmao_id: int,
+    payload: DefinirMensalidadeInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        irmao = tx.fetch_one(
+            "SELECT loja_id FROM irmaos WHERE id=%s AND deleted_at IS NULL",
+            (irmao_id,),
+        )
+        if not irmao:
+            raise HTTPException(status_code=404, detail="Irmão não encontrado.")
+        if actor.cargo not in ("admin_principal", "financeiro", "secretario", "veneravel_mestre") \
+                and irmao["loja_id"] != actor.loja_id:
+            raise HTTPException(status_code=403, detail="Sem permissão.")
+        tx.execute(
+            """INSERT INTO regras_mensalidade
+               (irmao_id, categoria, valor, vigencia_inicio, vigencia_fim, observacao)
+               VALUES (%s,%s,%s,%s,%s,%s)""",
+            (irmao_id, payload.categoria, payload.valor,
+             payload.vigencia_inicio, payload.vigencia_fim or None,
+             payload.observacao or None),
+        )
+    return {"status": "created"}
+
+
+class PagarMensalidadeInput(BaseModel):
+    loja_id: int
+    irmao_id: int
+    competencia: str          # YYYY-MM
+    valor: Optional[Decimal] = None
+    forma_pagamento: Optional[str] = None
+    observacao: Optional[str] = None
+
+
+@app.get("/mensalidades/status")
+def status_mensalidades(
+    loja_id: int = Query(...),
+    competencia: Optional[str] = Query(default=None),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    import datetime as _dt
+    comp = competencia or _dt.date.today().strftime("%Y-%m")
+    with db.transaction() as tx:
+        rows = tx.fetch_all(
+            """SELECT i.id, i.nome, i.cim, i.cargo_loja,
+                      rm.categoria, rm.valor,
+                      pm.id       AS pagamento_id,
+                      pm.pago_em,
+                      pm.forma_pagamento,
+                      pm.valor    AS valor_pago
+               FROM irmaos i
+               LEFT JOIN regras_mensalidade rm
+                      ON rm.irmao_id = i.id
+                     AND rm.vigencia_inicio <= CURRENT_DATE
+                     AND (rm.vigencia_fim IS NULL OR rm.vigencia_fim >= CURRENT_DATE)
+               LEFT JOIN pagamentos_mensalidade pm
+                      ON pm.irmao_id = i.id AND pm.competencia = %s
+               WHERE i.loja_id = %s
+                 AND i.deleted_at IS NULL
+                 AND i.status = 'ativo'
+               ORDER BY i.nome""",
+            (comp, loja_id),
+        )
+    return [dict(r) for r in rows]
+
+
+@app.post("/mensalidades/pagar", status_code=201)
+def registrar_pagamento(
+    payload: PagarMensalidadeInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    if not _re.match(r"^\d{4}-\d{2}$", payload.competencia):
+        raise HTTPException(status_code=422, detail="competencia deve ser YYYY-MM.")
+    with db.transaction() as tx:
+        irmao = tx.fetch_one(
+            "SELECT id, loja_id FROM irmaos WHERE id=%s AND deleted_at IS NULL",
+            (payload.irmao_id,),
+        )
+        if not irmao:
+            raise HTTPException(status_code=404, detail="Irmão não encontrado.")
+        if actor.cargo != "admin_principal" and irmao["loja_id"] != actor.loja_id:
+            raise HTTPException(status_code=403, detail="Sem acesso a este irmão.")
+        # Resolve valor: usa o informado ou busca da regra vigente
+        valor = payload.valor
+        if valor is None:
+            regra = tx.fetch_one(
+                """SELECT valor FROM regras_mensalidade
+                   WHERE irmao_id=%s AND vigencia_inicio <= CURRENT_DATE
+                     AND (vigencia_fim IS NULL OR vigencia_fim >= CURRENT_DATE)
+                   ORDER BY vigencia_inicio DESC LIMIT 1""",
+                (payload.irmao_id,),
+            )
+            valor = regra["valor"] if regra else Decimal("0")
+        existente = tx.fetch_one(
+            "SELECT id FROM pagamentos_mensalidade WHERE irmao_id=%s AND competencia=%s",
+            (payload.irmao_id, payload.competencia),
+        )
+        if existente:
+            raise HTTPException(status_code=409, detail="Pagamento já registrado para esta competência.")
+        row = tx.fetch_one(
+            """INSERT INTO pagamentos_mensalidade
+               (loja_id, irmao_id, competencia, valor, forma_pagamento, observacao, registrado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (payload.loja_id, payload.irmao_id, payload.competencia,
+             valor, payload.forma_pagamento, payload.observacao, actor.user_id),
+        )
+    if not row:
+        raise HTTPException(status_code=500, detail="Falha ao registrar pagamento.")
+    return {"id": row["id"], "status": "created"}
+
+
+@app.delete("/mensalidades/pagar/{pagamento_id}", status_code=204)
+def cancelar_pagamento(
+    pagamento_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        p = tx.fetch_one(
+            "SELECT id, loja_id FROM pagamentos_mensalidade WHERE id=%s",
+            (pagamento_id,),
+        )
+        if not p:
+            raise HTTPException(status_code=404, detail="Pagamento não encontrado.")
+        if actor.cargo != "admin_principal" and p["loja_id"] != actor.loja_id:
+            raise HTTPException(status_code=403, detail="Sem acesso a este pagamento.")
+        tx.execute("DELETE FROM pagamentos_mensalidade WHERE id=%s", (pagamento_id,))
+
+
+@app.get("/mensalidades/historico/{irmao_id}")
+def historico_pagamentos(
+    irmao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        irmao = tx.fetch_one("SELECT loja_id FROM irmaos WHERE id=%s AND deleted_at IS NULL", (irmao_id,))
+        if not irmao:
+            raise HTTPException(status_code=404, detail="Irmão não encontrado.")
+        if actor.cargo != "admin_principal" and irmao["loja_id"] != actor.loja_id:
+            raise HTTPException(status_code=403, detail="Sem acesso.")
+        rows = tx.fetch_all(
+            """SELECT * FROM pagamentos_mensalidade WHERE irmao_id=%s ORDER BY competencia DESC""",
+            (irmao_id,),
+        )
+    return [dict(r) for r in rows]
 
 
 # ═══════════════════════════════════════════════════════════
