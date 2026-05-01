@@ -102,6 +102,21 @@ const CARGOS = [
                       'criar_reembolso','upload_arquivo'],
   },
   {
+    id: 'orador',
+    label: 'Orador',
+    nivel: 60,
+    icone: '⚖️',
+    cor: '#0f766e',
+    descricao: 'Defende a Constituição e os Regulamentos da loja, emite pareceres e fiscaliza a legalidade das propostas.',
+    responsabilidades: [
+      { icone: '⚖️', titulo: 'Fiscalização normativa', desc: 'Garante que as deliberações respeitem a Constituição e os Regulamentos.' },
+      { icone: '📢', titulo: 'Pareceres e tribuna',     desc: 'Emite pareceres técnicos e usa a palavra em defesa da legalidade.' },
+      { icone: '📋', titulo: 'Análise de propostas',    desc: 'Examina propostas de admissão, filiação e regularização de irmãos.' },
+      { icone: '📁', titulo: 'Livro de proposta',        desc: 'Registra e acompanha as propostas submetidas à loja.' },
+    ],
+    funcionalidades: ['criar_mensagem','upload_arquivo'],
+  },
+  {
     id: 'chanceler',
     label: 'Chanceler',
     nivel: 60,
@@ -497,7 +512,7 @@ function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
    'relatoriosView','permissoesView','comissoesView','repositorioView',
    'agendaView','irmaoDetalheView','usuariosView','inventarioView','whatsappView',
-   'contratosView','tarefasView','lojasView','complexoView'].forEach(v => {
+   'contratosView','tarefasView','lojasView','complexoView','tenantsView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -568,6 +583,9 @@ function renderSidebar() {
     ${state.usuario?.cargo === 'admin_principal' ? `
     <div class="sidebar-nav-module" id="nav-lojas" onclick="abrirModulo('lojas')">
       <span style="font-size:15px">🏛️</span><span>Lojas & Complexos</span>
+    </div>
+    <div class="sidebar-nav-module" id="nav-tenants" onclick="abrirModulo('tenants')">
+      <span style="font-size:15px">💳</span><span>Gestão SaaS</span>
     </div>` : ''}
     ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo) || state.usuario?.loja_tipo === 'complexo' ? `
     <div class="sidebar-nav-module" id="nav-complexo_dash" onclick="abrirModulo('complexo_dash')">
@@ -634,6 +652,7 @@ function abrirModulo(id) {
     tarefas:        () => { mostrarView('tarefasView');    renderTarefasView(); },
     lojas:          () => { mostrarView('lojasView');      renderLojasView(); },
     complexo_dash:  () => { mostrarView('complexoView');   renderComplexoDashView(); },
+    tenants:        () => { mostrarView('tenantsView');    renderTenantsView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -780,6 +799,9 @@ async function renderIrmaoView() {
   await carregarCategoriasMensalidade(loja);
 
   const isAdmin = ['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo);
+
+  let lojasList = [];
+  try { lojasList = await api('GET', '/lojas'); } catch(_) {}
   const categoriaCards = _categoriasMensalidade.map(c => `
     <div class="cat-card">
       <div class="cat-card-titulo">${c.nome || c.id}</div>
@@ -859,7 +881,11 @@ async function renderIrmaoView() {
         </div>
         <div class="form-group">
           <label class="form-label">Loja</label>
-          <input class="form-input" id="fi_loja" type="text" placeholder="Nome ou nº da loja" />
+          <select class="form-select" id="fi_loja" ${!isAdmin ? 'disabled' : ''}>
+            ${lojasList.length
+              ? lojasList.map(l => `<option value="${l.id}" ${l.id === loja ? 'selected' : ''}>${l.nome}${l.numero ? ' nº' + l.numero : ''}</option>`).join('')
+              : `<option value="${loja}">Loja #${loja}</option>`}
+          </select>
         </div>
         <div class="form-group">
           <label class="form-label">WhatsApp / Celular</label>
@@ -935,7 +961,7 @@ async function salvarIrmao() {
     : [];
 
   const dados = {
-    loja_id:              state.usuario?.loja_id || 1,
+    loja_id:              parseInt(document.getElementById('fi_loja').value) || state.usuario?.loja_id || 1,
     nome:                 document.getElementById('fi_nome').value.trim(),
     cim:                  document.getElementById('fi_cim').value.trim() || null,
     potencia:             document.getElementById('fi_potencia').value.trim() || null,
@@ -952,7 +978,7 @@ async function salvarIrmao() {
     res.className = 'modal-result ok';
     res.textContent = 'Irmão cadastrado com sucesso!';
     // Limpa o formulário
-    ['fi_nome','fi_cim','fi_potencia','fi_loja','fi_tel','fi_nasc','fi_esposa','fi_filhos']
+    ['fi_nome','fi_cim','fi_tel','fi_nasc','fi_esposa','fi_filhos']
       .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
     const potenciaInput = document.getElementById('fi_potencia');
     if (potenciaInput) potenciaInput.value = 'GOE';
@@ -964,12 +990,22 @@ async function salvarIrmao() {
 }
 
 async function editarIrmao(id) {
-  let ir;
+  let ir, lojasList = [];
   try { ir = await api('GET', `/irmaos/${id}`); }
   catch(e) { alert('Erro ao carregar: ' + e.message); return; }
+  const isAdmin = ['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo);
+  if (isAdmin) {
+    try { lojasList = await api('GET', '/lojas'); } catch(_) {}
+  }
   const filhosStr = (ir.filhos || []).map(f =>
     f.nome + (f.data_nascimento ? ' / ' + f.data_nascimento : '')
   ).join('\n');
+  const lojaField = isAdmin && lojasList.length
+    ? `<div class="form-group" style="grid-column:1/-1"><label>Loja</label>
+        <select class="modal-input" id="ei_loja_id">
+          ${lojasList.map(l=>`<option value="${l.id}" ${l.id===ir.loja_id?'selected':''}>${l.nome}${l.numero?' nº'+l.numero:''}</option>`).join('')}
+        </select></div>`
+    : `<input type="hidden" id="ei_loja_id" value="${ir.loja_id}" />`;
   abrirModal(`Editar — ${ir.nome}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group" style="grid-column:1/-1"><label>Nome completo</label>
@@ -986,6 +1022,7 @@ async function editarIrmao(id) {
         <input class="modal-input" type="date" id="ei_nasc" value="${ir.data_nascimento||''}" /></div>
       <div class="form-group" style="grid-column:1/-1"><label>Nome da Esposa</label>
         <input class="modal-input" id="ei_esposa" value="${ir.nome_esposa||''}" /></div>
+      ${lojaField}
       <div class="form-group"><label>Cargo / Função na Loja</label>
         <select class="modal-input" id="ei_cargo_loja">
           ${CARGOS_LOJA_OPCOES.map(c => `<option value="${c}" ${(ir.cargo_loja||'')===c?'selected':''}>${c||'— sem cargo —'}</option>`).join('')}
@@ -996,11 +1033,12 @@ async function editarIrmao(id) {
     <div class="sb-msg" id="eiMsg"></div>
   `, [
     { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
-    { label: 'Salvar',   cls: 'primary', action: `salvarEdicaoIrmao(${id},${ir.loja_id})` },
+    { label: 'Salvar',   cls: 'primary', action: `salvarEdicaoIrmao(${id})` },
   ]);
 }
 
-async function salvarEdicaoIrmao(id, lojaId) {
+async function salvarEdicaoIrmao(id) {
+  const lojaId = parseInt(document.getElementById('ei_loja_id')?.value) || state.usuario?.loja_id || 1;
   const filhosRaw = (document.getElementById('ei_filhos').value||'').trim();
   const filhos = filhosRaw
     ? filhosRaw.split('\n').filter(l=>l.trim()).map(l=>{
@@ -3683,7 +3721,8 @@ function _ljaCard(l, isAdmin) {
       </div>
       ${l.potencia     ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">⚡ ${l.potencia}</div>` : ''}
       ${l.cidade       ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">📍 ${l.cidade}</div>` : ''}
-      ${l.complexo_nome? `<div style="font-size:12px;color:var(--muted);margin-top:2px">↗ ${l.complexo_nome}</div>` : ''}
+      ${l.complexo_nome ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">↗ ${l.complexo_nome}</div>` : ''}
+      ${l.tenant_nome   ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">💳 ${l.tenant_nome}</div>` : ''}
       <div style="display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:12px;
                   border-top:1px solid var(--border);flex-wrap:wrap">
         <span style="font-size:12px;color:var(--muted);margin-right:auto">👥 ${l.total_irmaos||0} irmãos</span>
@@ -3702,9 +3741,10 @@ async function abrirModalLoja(id) {
   if (!overlay) { await renderLojasView(); return abrirModalLoja(id); }
   const l = id ? _lojasCache[id] : null;
 
-  // Carrega lista de complexos para o dropdown
-  let complexos = [];
+  // Carrega lista de complexos e tenants para os dropdowns
+  let complexos = [], tenants = [];
   try { complexos = (await api('GET', '/lojas?tipo=complexo')); } catch(_) {}
+  try { tenants   = (await api('GET', '/tenants')); } catch(_) {}
 
   const CARGOS_LOJAS = ['GOE','GLEMT','GOEB','GOB','GONMB','Outra'];
 
@@ -3762,6 +3802,14 @@ async function abrirModalLoja(id) {
           <label>Endereço</label>
           <input class="modal-input" id="lj_end" value="${l?.endereco||''}" placeholder="Endereço completo" />
         </div>
+        ${tenants.length ? `
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Tenant SaaS</label>
+          <select class="modal-input" id="lj_tenant_id">
+            <option value="">— Sem tenant —</option>
+            ${tenants.map(t=>`<option value="${t.id}" ${l?.tenant_id===t.id?'selected':''}>${t.nome} (${t.tipo})</option>`).join('')}
+          </select>
+        </div>` : ''}
       </div>
       <div id="lj_msg" class="modal-result" style="display:none"></div>
     </div>
@@ -3791,6 +3839,7 @@ async function salvarLoja(id) {
     msg.textContent='Nome obrigatório.'; return;
   }
   const complexo_id = +document.getElementById('lj_complexo_id')?.value || null;
+  const tenant_id   = +document.getElementById('lj_tenant_id')?.value  || null;
   const payload = {
     nome, numero:  document.getElementById('lj_num').value.trim() || null,
     tipo:          document.getElementById('lj_tipo').value,
@@ -3801,6 +3850,8 @@ async function salvarLoja(id) {
     endereco:      document.getElementById('lj_end').value.trim() || null,
     complexo_id,
     limpar_complexo: !complexo_id && !!id,
+    tenant_id,
+    limpar_tenant: !tenant_id && !!id,
   };
   try {
     if (id) await api('PUT', `/lojas/${id}`, payload);
@@ -3935,6 +3986,7 @@ async function vincularUsuarioLoja(usuarioId) {
       {id:'primeiro_vigilante',  label:'1º Vigilante'},
       {id:'segundo_vigilante',   label:'2º Vigilante'},
       {id:'secretario',          label:'Secretário'},
+      {id:'orador',              label:'Orador'},
       {id:'financeiro',          label:'Tesoureiro'},
       {id:'chanceler',           label:'Chanceler'},
       {id:'arquiteto',           label:'Arquiteto'},
@@ -4069,6 +4121,383 @@ async function verArquivoContrato(url) {
     const blob = await res.blob();
     window.open(URL.createObjectURL(blob), '_blank');
   } catch(e) { alert('Erro ao abrir arquivo: ' + e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MÓDULO — GESTÃO SAAS (TENANTS & ASSINATURAS)
+// ═══════════════════════════════════════════════════════════
+
+const _TENANT_STATUS_COR = {
+  ativo:     '#16a34a',
+  teste:     '#0369a1',
+  bloqueado: '#dc2626',
+  cancelado: '#94a3b8',
+};
+
+function _tenantBadge(status) {
+  const cor = _TENANT_STATUS_COR[status] || '#64748b';
+  const label = { ativo:'Ativo', teste:'Teste', bloqueado:'Bloqueado', cancelado:'Cancelado' }[status] || status;
+  return `<span style="background:${cor}18;color:${cor};border:1px solid ${cor}33;
+    padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700">${label}</span>`;
+}
+
+async function renderTenantsView() {
+  const view = document.getElementById('tenantsView');
+  view.innerHTML = `<div class="loading">Carregando tenants…</div>`;
+  try {
+    const lista = await api('GET', '/tenants');
+    const stats = {
+      total:    lista.length,
+      ativos:   lista.filter(t => t.status === 'ativo').length,
+      bloq:     lista.filter(t => t.status === 'bloqueado').length,
+      teste:    lista.filter(t => t.status === 'teste').length,
+    };
+
+    const rows = lista.map(t => `
+      <tr style="border-top:1px solid var(--border)">
+        <td style="padding:10px 14px;font-weight:600">
+          ${t.nome}
+          ${t.tipo === 'interno' ? '<span style="font-size:10px;background:#7c3aed18;color:#7c3aed;border-radius:8px;padding:1px 6px;margin-left:6px">interno</span>' : ''}
+        </td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--muted)">${t.plano || '—'}</td>
+        <td style="padding:10px 14px;text-align:right;font-size:13px">
+          ${t.valor_mensalidade ? 'R$ ' + Number(t.valor_mensalidade).toFixed(2).replace('.',',') : '—'}
+        </td>
+        <td style="padding:10px 14px;text-align:center">${t.total_lojas || 0}</td>
+        <td style="padding:10px 14px;text-align:center">${t.total_usuarios || 0}</td>
+        <td style="padding:10px 14px;text-align:center">${t.ultima_competencia || '—'}</td>
+        <td style="padding:10px 14px;text-align:center">${_tenantBadge(t.status)}</td>
+        <td style="padding:10px 14px;white-space:nowrap;text-align:right">
+          <button class="func-btn neutral" style="padding:3px 10px;font-size:12px"
+            onclick="renderAssView(${t.id},'${t.nome.replace(/'/g,"\\'")}')">Assinaturas</button>
+          <button class="func-btn neutral" style="padding:3px 10px;font-size:12px"
+            onclick="abrirModalTenant(${t.id})">Editar</button>
+          ${t.status === 'bloqueado'
+            ? `<button class="func-btn primary" style="padding:3px 10px;font-size:12px;background:#16a34a"
+                onclick="alterarStatusTenant(${t.id},'ativo')">Ativar</button>`
+            : t.status === 'ativo' || t.status === 'teste'
+              ? `<button class="func-btn primary" style="padding:3px 10px;font-size:12px;background:#dc2626"
+                  onclick="alterarStatusTenant(${t.id},'bloqueado')">Bloquear</button>`
+              : ''}
+          ${t.tipo !== 'interno' ? `
+          <button class="func-btn neutral" style="padding:3px 10px;font-size:12px;color:#dc2626"
+            onclick="confirmarDeletarTenant(${t.id},'${t.nome.replace(/'/g,"\\'")}')">✕</button>` : ''}
+        </td>
+      </tr>`).join('');
+
+    view.innerHTML = `
+      <div class="view-header" style="margin-bottom:20px">
+        <div>
+          <h1>Gestão SaaS</h1>
+          <div style="font-size:13px;color:var(--muted)">Tenants, planos e assinaturas</div>
+        </div>
+        <button class="btn-primary" onclick="abrirModalTenant(null)">+ Novo Tenant</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:24px">
+        ${_dashCard('🏢', stats.total,  'Total de tenants',  '#0369a1')}
+        ${_dashCard('✅', stats.ativos, 'Ativos',            '#16a34a')}
+        ${_dashCard('🚫', stats.bloq,   'Bloqueados',        '#dc2626')}
+        ${_dashCard('🧪', stats.teste,  'Em teste',          '#7c3aed')}
+      </div>
+
+      <div id="assSubPanel"></div>
+
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)">
+        <div style="padding:14px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">
+          📋 Tenants cadastrados
+        </div>
+        ${lista.length ? `
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:var(--bg)">
+              <th style="padding:8px 14px;text-align:left;color:var(--muted);font-weight:600">Nome</th>
+              <th style="padding:8px 14px;text-align:left;color:var(--muted);font-weight:600">Plano</th>
+              <th style="padding:8px 14px;text-align:right;color:var(--muted);font-weight:600">Mensalidade</th>
+              <th style="padding:8px 14px;text-align:center;color:var(--muted);font-weight:600">Lojas</th>
+              <th style="padding:8px 14px;text-align:center;color:var(--muted);font-weight:600">Usuários</th>
+              <th style="padding:8px 14px;text-align:center;color:var(--muted);font-weight:600">Ult. competência</th>
+              <th style="padding:8px 14px;text-align:center;color:var(--muted);font-weight:600">Status</th>
+              <th style="padding:8px 14px;text-align:right;color:var(--muted);font-weight:600">Ações</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>` :
+        `<div class="empty-msg">Nenhum tenant cadastrado ainda.</div>`}
+      </div>`;
+  } catch(e) {
+    view.innerHTML = `<div class="error-msg">Erro ao carregar tenants: ${e.message}</div>`;
+  }
+}
+
+async function renderAssView(tenantId, tenantNome) {
+  const panel = document.getElementById('assSubPanel');
+  if (!panel) return;
+  panel.innerHTML = `<div class="loading" style="margin-bottom:16px">Carregando assinaturas…</div>`;
+  try {
+    const lista = await api('GET', `/assinaturas-saas?tenant_id=${tenantId}`);
+    const _stCor = { pendente:'#d97706', pago:'#16a34a', vencido:'#dc2626', cancelado:'#94a3b8' };
+    const _stLbl = { pendente:'Pendente', pago:'Pago', vencido:'Vencido', cancelado:'Cancelado' };
+    panel.innerHTML = `
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;
+                  overflow:hidden;box-shadow:var(--shadow);margin-bottom:20px">
+        <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;font-size:14px">💳 Assinaturas — ${tenantNome}</span>
+          <div style="display:flex;gap:8px">
+            <button class="func-btn neutral" style="font-size:12px;padding:4px 12px"
+              onclick="abrirModalAssCreate(${tenantId})">+ Lançar cobrança</button>
+            <button class="func-btn primary" style="font-size:12px;padding:4px 12px"
+              onclick="gerarMensalidade(${tenantId})">⟳ Gerar mês atual</button>
+            <button class="func-btn neutral" style="font-size:12px;padding:4px 12px"
+              onclick="document.getElementById('assSubPanel').innerHTML=''">✕ Fechar</button>
+          </div>
+        </div>
+        ${lista.length ? `
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:var(--bg)">
+              <th style="padding:8px 14px;text-align:left;color:var(--muted)">Competência</th>
+              <th style="padding:8px 14px;text-align:right;color:var(--muted)">Valor</th>
+              <th style="padding:8px 14px;text-align:center;color:var(--muted)">Vencimento</th>
+              <th style="padding:8px 14px;text-align:center;color:var(--muted)">Status</th>
+              <th style="padding:8px 14px;text-align:center;color:var(--muted)">Pago em</th>
+              <th style="padding:8px 14px;text-align:center;color:var(--muted)">Forma</th>
+              <th style="padding:8px 14px;text-align:right;color:var(--muted)">Ação</th>
+            </tr></thead>
+            <tbody>
+              ${lista.map(a => {
+                const cor = _stCor[a.status] || '#64748b';
+                const lbl = _stLbl[a.status] || a.status;
+                const badge = `<span style="background:${cor}18;color:${cor};border:1px solid ${cor}33;
+                  padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700">${lbl}</span>`;
+                const pagoEm = a.pago_em ? a.pago_em.substring(0,10) : '—';
+                return `<tr style="border-top:1px solid var(--border)">
+                  <td style="padding:10px 14px;font-weight:600">${a.competencia}</td>
+                  <td style="padding:10px 14px;text-align:right">R$ ${Number(a.valor).toFixed(2).replace('.',',')}</td>
+                  <td style="padding:10px 14px;text-align:center">${a.vencimento ? a.vencimento.substring(0,10) : '—'}</td>
+                  <td style="padding:10px 14px;text-align:center">${badge}</td>
+                  <td style="padding:10px 14px;text-align:center;color:var(--muted)">${pagoEm}</td>
+                  <td style="padding:10px 14px;text-align:center;color:var(--muted)">${a.forma_pagamento || '—'}</td>
+                  <td style="padding:10px 14px;text-align:right">
+                    ${a.status !== 'pago' ? `<button class="func-btn primary" style="padding:3px 10px;font-size:12px"
+                      onclick="marcarAssNPaga(${a.id},${tenantId},'${tenantNome.replace(/'/g,"\\'")}')">✓ Pago</button>` : ''}
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>` :
+        `<div class="empty-msg">Nenhuma assinatura lançada para este tenant.</div>`}
+      </div>`;
+  } catch(e) {
+    panel.innerHTML = `<div class="error-msg" style="margin-bottom:16px">Erro ao carregar assinaturas: ${e.message}</div>`;
+  }
+}
+
+async function marcarAssNPaga(assId, tenantId, tenantNome) {
+  const modal  = document.getElementById('modalOverlay');
+  const title  = document.getElementById('modalTitle');
+  const body   = document.getElementById('modalBody');
+  const footer = document.getElementById('modalFooter');
+  title.textContent = 'Registrar Pagamento';
+  body.innerHTML = `
+    <div class="form-group">
+      <label class="modal-label">Forma de pagamento</label>
+      <select class="modal-input" id="ass_forma">
+        <option value="">— selecione —</option>
+        <option value="pix">Pix</option>
+        <option value="boleto">Boleto</option>
+        <option value="transferencia">Transferência</option>
+        <option value="dinheiro">Dinheiro</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="modal-label">Observação</label>
+      <input class="modal-input" id="ass_obs" placeholder="Opcional" />
+    </div>
+    <div id="ass_msg" class="modal-result" style="display:none"></div>`;
+  footer.innerHTML = `
+    <button class="func-btn neutral" onclick="fecharModal()">Cancelar</button>
+    <button class="func-btn primary" onclick="_confirmarAssNPaga(${assId},${tenantId},'${tenantNome.replace(/'/g,"\\'")}')">Confirmar pagamento</button>`;
+  modal.classList.add('open');
+}
+
+async function _confirmarAssNPaga(assId, tenantId, tenantNome) {
+  const forma = document.getElementById('ass_forma').value;
+  const obs   = document.getElementById('ass_obs').value.trim();
+  const msg   = document.getElementById('ass_msg');
+  try {
+    await api('PATCH', `/assinaturas-saas/${assId}/pagar`, { forma_pagamento: forma || null, observacao: obs || null });
+    fecharModal();
+    renderAssView(tenantId, tenantNome);
+  } catch(e) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message;
+  }
+}
+
+async function gerarMensalidade(tenantId) {
+  try {
+    const r = await api('POST', `/tenants/${tenantId}/gerar-mensalidade`, {});
+    if (r.status === 'already_exists') alert('Já existe cobrança para o mês atual.');
+    else renderTenantsView();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function abrirModalAssCreate(tenantId) {
+  const modal  = document.getElementById('modalOverlay');
+  const title  = document.getElementById('modalTitle');
+  const body   = document.getElementById('modalBody');
+  const footer = document.getElementById('modalFooter');
+  const hoje = new Date();
+  const comp  = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  const venc  = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}-10`;
+  title.textContent = 'Lançar Cobrança Manual';
+  body.innerHTML = `
+    <div class="form-group">
+      <label class="modal-label">Competência (YYYY-MM)</label>
+      <input class="modal-input" id="ac_comp" value="${comp}" />
+    </div>
+    <div class="form-group">
+      <label class="modal-label">Valor (R$)</label>
+      <input class="modal-input" id="ac_valor" type="number" step="0.01" placeholder="0,00" />
+    </div>
+    <div class="form-group">
+      <label class="modal-label">Vencimento (YYYY-MM-DD)</label>
+      <input class="modal-input" id="ac_venc" value="${venc}" />
+    </div>
+    <div class="form-group">
+      <label class="modal-label">Observação</label>
+      <input class="modal-input" id="ac_obs" placeholder="Opcional" />
+    </div>
+    <div id="ac_msg" class="modal-result" style="display:none"></div>`;
+  footer.innerHTML = `
+    <button class="func-btn neutral" onclick="fecharModal()">Cancelar</button>
+    <button class="func-btn primary" onclick="_salvarAssCreate(${tenantId})">Lançar</button>`;
+  modal.classList.add('open');
+}
+
+async function _salvarAssCreate(tenantId) {
+  const comp  = document.getElementById('ac_comp').value.trim();
+  const valor = parseFloat(document.getElementById('ac_valor').value);
+  const venc  = document.getElementById('ac_venc').value.trim();
+  const obs   = document.getElementById('ac_obs').value.trim();
+  const msg   = document.getElementById('ac_msg');
+  if (!comp || isNaN(valor) || !venc) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Preencha todos os campos obrigatórios.'; return;
+  }
+  try {
+    await api('POST', '/assinaturas-saas', { tenant_id: tenantId, competencia: comp, valor, vencimento: venc, observacao: obs || null });
+    fecharModal();
+    renderTenantsView();
+  } catch(e) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message;
+  }
+}
+
+async function abrirModalTenant(id) {
+  let tenant = null;
+  if (id) {
+    const lista = await api('GET', '/tenants').catch(() => []);
+    tenant = lista.find(t => t.id === id);
+  }
+  const modal  = document.getElementById('modalOverlay');
+  const title  = document.getElementById('modalTitle');
+  const body   = document.getElementById('modalBody');
+  const footer = document.getElementById('modalFooter');
+  title.textContent = id ? 'Editar Tenant' : 'Novo Tenant';
+  body.innerHTML = `
+    <div class="form-group">
+      <label class="modal-label">Nome *</label>
+      <input class="modal-input" id="tn_nome" value="${tenant?.nome||''}" placeholder="Nome do complexo/loja" />
+    </div>
+    <div class="form-group">
+      <label class="modal-label">Tipo</label>
+      <select class="modal-input" id="tn_tipo">
+        <option value="externo" ${(tenant?.tipo||'externo')==='externo'?'selected':''}>Externo</option>
+        <option value="interno" ${tenant?.tipo==='interno'?'selected':''}>Interno (próprio)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="modal-label">Plano</label>
+      <input class="modal-input" id="tn_plano" value="${tenant?.plano||''}" placeholder="ex: basico, premium" />
+    </div>
+    <div class="form-group">
+      <label class="modal-label">Mensalidade (R$)</label>
+      <input class="modal-input" id="tn_valor" type="number" step="0.01"
+        value="${tenant?.valor_mensalidade||''}" placeholder="0,00" />
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="modal-label">Dia vencimento</label>
+        <input class="modal-input" id="tn_dia" type="number" min="1" max="28"
+          value="${tenant?.vencimento_dia||10}" />
+      </div>
+      <div class="form-group">
+        <label class="modal-label">Dias tolerância</label>
+        <input class="modal-input" id="tn_tol" type="number" min="0"
+          value="${tenant?.dias_tolerancia||5}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="modal-label">Status</label>
+      <select class="modal-input" id="tn_status">
+        <option value="ativo"     ${(tenant?.status||'ativo')==='ativo'?'selected':''}>Ativo</option>
+        <option value="teste"     ${tenant?.status==='teste'?'selected':''}>Teste</option>
+        <option value="bloqueado" ${tenant?.status==='bloqueado'?'selected':''}>Bloqueado</option>
+        <option value="cancelado" ${tenant?.status==='cancelado'?'selected':''}>Cancelado</option>
+      </select>
+    </div>
+    <div id="tn_msg" class="modal-result" style="display:none"></div>`;
+  footer.innerHTML = `
+    <button class="func-btn neutral" onclick="fecharModal()">Cancelar</button>
+    <button class="func-btn primary" onclick="_salvarTenant(${id||'null'})">Salvar</button>`;
+  modal.classList.add('open');
+}
+
+async function _salvarTenant(id) {
+  const nome   = document.getElementById('tn_nome').value.trim();
+  const tipo   = document.getElementById('tn_tipo').value;
+  const plano  = document.getElementById('tn_plano').value.trim();
+  const valor  = document.getElementById('tn_valor').value;
+  const dia    = parseInt(document.getElementById('tn_dia').value);
+  const tol    = parseInt(document.getElementById('tn_tol').value);
+  const status = document.getElementById('tn_status').value;
+  const msg    = document.getElementById('tn_msg');
+  if (!nome) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Nome é obrigatório.'; return; }
+  const payload = {
+    nome,
+    tipo,
+    plano: plano || null,
+    valor_mensalidade: valor ? parseFloat(valor) : null,
+    vencimento_dia: dia,
+    dias_tolerancia: tol,
+    status,
+  };
+  try {
+    if (id) await api('PUT',  `/tenants/${id}`, payload);
+    else    await api('POST', '/tenants',       payload);
+    fecharModal();
+    renderTenantsView();
+  } catch(e) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message;
+  }
+}
+
+async function alterarStatusTenant(id, novoStatus) {
+  const label = novoStatus === 'bloqueado' ? 'bloquear' : 'ativar';
+  if (!confirm(`Confirma ${label} este tenant?`)) return;
+  try {
+    await api('PATCH', `/tenants/${id}/status`, { status: novoStatus });
+    renderTenantsView();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function confirmarDeletarTenant(id, nome) {
+  if (!confirm(`Cancelar o tenant "${nome}"? Esta ação não pode ser desfeita.`)) return;
+  try {
+    await api('DELETE', `/tenants/${id}`);
+    renderTenantsView();
+  } catch(e) { alert('Erro: ' + e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════

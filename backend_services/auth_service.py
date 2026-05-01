@@ -15,9 +15,13 @@ class AuthService:
         with self.db.transaction() as tx:
             user = tx.fetch_one(
                 """
-                select u.id, u.loja_id, u.senha_hash, c.nome as cargo
+                select u.id, u.loja_id, u.senha_hash, c.nome as cargo,
+                       t.id as tenant_id,
+                       coalesce(t.status, 'ativo') as tenant_status
                 from usuarios u
                 join cargos c on c.id = u.cargo_id
+                left join lojas l on l.id = u.loja_id and l.deleted_at is null
+                left join tenants t on t.id = l.tenant_id
                 where u.email = %s
                   and u.ativo = true
                   and u.deleted_at is null
@@ -35,6 +39,8 @@ class AuthService:
                 user_id=user["id"],
                 loja_id=user["loja_id"],
                 cargo=user["cargo"],
+                tenant_id=user["tenant_id"],
+                tenant_status=user["tenant_status"] or "ativo",
             )
 
     @staticmethod

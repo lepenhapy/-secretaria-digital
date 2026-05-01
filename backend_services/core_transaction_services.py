@@ -20,6 +20,8 @@ class Actor:
     user_id: int
     loja_id: Optional[int]
     cargo: str
+    tenant_id: Optional[int] = None
+    tenant_status: str = 'ativo'
 
 
 class CoreTransactionServices:

@@ -1,7 +1,7 @@
 import os
 import secrets
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from backend_services.agenda_service import AgendaService
@@ -198,6 +198,7 @@ def get_whatsapp_bot():
 
 
 def get_current_actor(
+    request: Request,
     credentials: HTTPBasicCredentials = Depends(_basic_security),
     auth_service: AuthService = Depends(get_auth_service),
 ):
@@ -211,5 +212,15 @@ def get_current_actor(
     if actor is None:
         secrets.compare_digest("invalid", "invalid")
         raise HTTPException(status_code=401, detail="invalid_credentials")
+
+    if (
+        actor.tenant_status == "bloqueado"
+        and actor.cargo != "admin_principal"
+        and request.method in ("POST", "PUT", "PATCH", "DELETE")
+    ):
+        raise HTTPException(
+            status_code=402,
+            detail="Assinatura bloqueada. Regularize o pagamento para continuar operando.",
+        )
 
     return actor

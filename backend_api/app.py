@@ -497,7 +497,7 @@ def _ensure_schema(db) -> None:
         "ALTER TABLE compras_arquivos ADD COLUMN IF NOT EXISTS conteudo BYTEA",
         # ── cargos extras ─────────────────────────────────────────────────────
         """INSERT INTO cargos (nome, nivel_hierarquico) VALUES
-           ('mestre_banquete', 55), ('obreiro', 20), ('irmao_loja', 15)
+           ('mestre_banquete', 55), ('obreiro', 20), ('irmao_loja', 15), ('orador', 60)
            ON CONFLICT (nome) DO NOTHING""",
         # ── 027: tarefas ──────────────────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS tarefas (
@@ -527,6 +527,37 @@ def _ensure_schema(db) -> None:
         "ALTER TABLE lojas ADD COLUMN IF NOT EXISTS potencia VARCHAR(100)",
         "ALTER TABLE lojas ADD COLUMN IF NOT EXISTS endereco TEXT",
         "CREATE INDEX IF NOT EXISTS idx_lojas_complexo_id ON lojas(complexo_id)",
+        # ── 029: multi-tenant SaaS ────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS tenants (
+            id SERIAL PRIMARY KEY,
+            nome VARCHAR(150) NOT NULL,
+            tipo VARCHAR(20) NOT NULL DEFAULT 'externo'
+                CHECK (tipo IN ('interno','externo')),
+            plano VARCHAR(50),
+            valor_mensalidade NUMERIC(10,2),
+            vencimento_dia INT DEFAULT 10
+                CHECK (vencimento_dia BETWEEN 1 AND 28),
+            dias_tolerancia INT DEFAULT 5,
+            status VARCHAR(20) NOT NULL DEFAULT 'ativo'
+                CHECK (status IN ('ativo','bloqueado','cancelado','teste')),
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            cancelado_em TIMESTAMPTZ)""",
+        "ALTER TABLE lojas ADD COLUMN IF NOT EXISTS tenant_id INT REFERENCES tenants(id)",
+        """CREATE TABLE IF NOT EXISTS assinaturas_saas (
+            id SERIAL PRIMARY KEY,
+            tenant_id INT NOT NULL REFERENCES tenants(id),
+            competencia VARCHAR(7) NOT NULL,
+            valor NUMERIC(10,2) NOT NULL,
+            vencimento DATE NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'pendente'
+                CHECK (status IN ('pendente','pago','vencido','cancelado')),
+            pago_em TIMESTAMPTZ,
+            forma_pagamento VARCHAR(30),
+            observacao TEXT,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(tenant_id, competencia))""",
+        "CREATE INDEX IF NOT EXISTS idx_assinaturas_tenant_id ON assinaturas_saas(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_lojas_tenant_id ON lojas(tenant_id)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -753,6 +784,8 @@ def me(actor: Actor = Depends(get_current_actor), db=Depends(get_database)):
         "loja_tipo": loja["tipo"]  if loja else None,
         "loja_numero": loja["numero"] if loja else None,
         "loja_complexo_id": loja["complexo_id"] if loja else None,
+        "tenant_id":     actor.tenant_id,
+        "tenant_status": actor.tenant_status,
     }
 
 
@@ -765,6 +798,7 @@ class LojaInput(BaseModel):
     numero: Optional[str] = None
     tipo: str = "loja"
     complexo_id: Optional[int] = None
+    tenant_id: Optional[int] = None
     status: str = "ativa"
     cidade: Optional[str] = None
     potencia: Optional[str] = None
@@ -776,12 +810,14 @@ class LojaUpdateInput(BaseModel):
     numero: Optional[str] = None
     tipo: Optional[str] = None
     complexo_id: Optional[int] = None
+    tenant_id: Optional[int] = None
     status: Optional[str] = None
     cidade: Optional[str] = None
     potencia: Optional[str] = None
     endereco: Optional[str] = None
     telefone_whatsapp: Optional[str] = None
-    limpar_complexo: bool = False  # true → set complexo_id = NULL
+    limpar_complexo: bool = False
+    limpar_tenant: bool = False
 
 class VincularLojaInput(BaseModel):
     loja_id: Optional[int] = None
@@ -814,14 +850,17 @@ def listar_lojas(
         rows = tx.fetch_all(
             f"""SELECT l.id, l.nome, l.numero, l.tipo, l.status, l.cidade,
                        l.potencia, l.endereco, l.telefone_whatsapp, l.complexo_id,
-                       l.created_at,
+                       l.tenant_id, l.created_at,
                        lc.nome AS complexo_nome,
+                       t.nome  AS tenant_nome,
+                       t.status AS tenant_status,
                        COUNT(DISTINCT i.id) AS total_irmaos
                 FROM lojas l
                 LEFT JOIN lojas lc ON lc.id = l.complexo_id
+                LEFT JOIN tenants t ON t.id = l.tenant_id
                 LEFT JOIN irmaos i ON i.loja_id = l.id AND i.deleted_at IS NULL
                 WHERE {where}
-                GROUP BY l.id, lc.nome
+                GROUP BY l.id, lc.nome, t.nome, t.status
                 ORDER BY l.tipo DESC, l.nome""",
             params,
         )
@@ -841,10 +880,10 @@ def criar_loja(
     with db.transaction() as tx:
         row = tx.fetch_one(
             """INSERT INTO lojas
-               (nome, numero, tipo, complexo_id, status, cidade, potencia, endereco, telefone_whatsapp)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+               (nome, numero, tipo, complexo_id, tenant_id, status, cidade, potencia, endereco, telefone_whatsapp)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (payload.nome, payload.numero, payload.tipo, payload.complexo_id,
-             payload.status, payload.cidade, payload.potencia,
+             payload.tenant_id, payload.status, payload.cidade, payload.potencia,
              payload.endereco, payload.telefone_whatsapp),
         )
     if not row:
@@ -878,6 +917,10 @@ def atualizar_loja(
             sets.append("complexo_id=NULL")
         elif payload.complexo_id is not None:
             sets.append("complexo_id=%s"); params.append(payload.complexo_id)
+        if payload.limpar_tenant:
+            sets.append("tenant_id=NULL")
+        elif payload.tenant_id is not None:
+            sets.append("tenant_id=%s"); params.append(payload.tenant_id)
         if sets:
             sets.append("updated_at=NOW()")
             params.append(loja_id)
@@ -3027,6 +3070,281 @@ def deletar_tarefa(
         if not row:
             raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
         tx.execute("UPDATE tarefas SET deleted_at=NOW() WHERE id=%s", (tarefa_id,))
+
+
+# ═══════════════════════════════════════════════════════════
+#  TENANTS & ASSINATURAS SAAS
+# ═══════════════════════════════════════════════════════════
+
+class TenantInput(BaseModel):
+    nome: str
+    tipo: str = "externo"
+    plano: Optional[str] = None
+    valor_mensalidade: Optional[Decimal] = None
+    vencimento_dia: int = 10
+    dias_tolerancia: int = 5
+    status: str = "ativo"
+
+class TenantUpdateInput(BaseModel):
+    nome: Optional[str] = None
+    plano: Optional[str] = None
+    valor_mensalidade: Optional[Decimal] = None
+    vencimento_dia: Optional[int] = None
+    dias_tolerancia: Optional[int] = None
+    status: Optional[str] = None
+
+class TenantStatusInput(BaseModel):
+    status: str
+
+class AssinaturaInput(BaseModel):
+    tenant_id: int
+    competencia: str   # YYYY-MM
+    valor: Decimal
+    vencimento: str    # YYYY-MM-DD
+    observacao: Optional[str] = None
+
+class AssinaturaPagarInput(BaseModel):
+    forma_pagamento: Optional[str] = None
+    observacao: Optional[str] = None
+
+
+def _only_admin(actor: Actor):
+    if actor.cargo != "admin_principal":
+        raise HTTPException(status_code=403, detail="Apenas admin pode executar esta operação.")
+
+
+@app.get("/tenants")
+def listar_tenants(
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    _only_admin(actor)
+    with db.transaction() as tx:
+        rows = tx.fetch_all(
+            """SELECT t.*,
+                      COUNT(DISTINCT l.id)  AS total_lojas,
+                      COUNT(DISTINCT u.id)  AS total_usuarios,
+                      MAX(a.competencia)    AS ultima_competencia,
+                      (SELECT a2.status FROM assinaturas_saas a2
+                       WHERE a2.tenant_id = t.id
+                       ORDER BY a2.criado_em DESC LIMIT 1) AS ultimo_status_ass
+               FROM tenants t
+               LEFT JOIN lojas l    ON l.tenant_id = t.id AND l.deleted_at IS NULL
+               LEFT JOIN usuarios u ON u.loja_id   = l.id AND u.deleted_at IS NULL AND u.ativo = TRUE
+               LEFT JOIN assinaturas_saas a ON a.tenant_id = t.id
+               WHERE t.cancelado_em IS NULL
+               GROUP BY t.id
+               ORDER BY t.tipo, t.nome""",
+            [],
+        )
+    return [dict(r) for r in rows]
+
+
+@app.post("/tenants", status_code=201)
+def criar_tenant(
+    payload: TenantInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    _only_admin(actor)
+    if payload.tipo not in ("interno", "externo"):
+        raise HTTPException(status_code=422, detail="tipo deve ser 'interno' ou 'externo'.")
+    if payload.status not in ("ativo", "bloqueado", "cancelado", "teste"):
+        raise HTTPException(status_code=422, detail="status inválido.")
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            """INSERT INTO tenants (nome, tipo, plano, valor_mensalidade, vencimento_dia, dias_tolerancia, status)
+               VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (payload.nome, payload.tipo, payload.plano, payload.valor_mensalidade,
+             payload.vencimento_dia, payload.dias_tolerancia, payload.status),
+        )
+    if not row:
+        raise HTTPException(status_code=500, detail="Falha ao criar tenant.")
+    return {"id": row["id"], "status": "created"}
+
+
+@app.put("/tenants/{tenant_id}")
+def atualizar_tenant(
+    tenant_id: int,
+    payload: TenantUpdateInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    _only_admin(actor)
+    with db.transaction() as tx:
+        if not tx.fetch_one("SELECT id FROM tenants WHERE id=%s AND cancelado_em IS NULL", (tenant_id,)):
+            raise HTTPException(status_code=404, detail="Tenant não encontrado.")
+        sets, params = [], []
+        if payload.nome              is not None: sets.append("nome=%s");               params.append(payload.nome)
+        if payload.plano             is not None: sets.append("plano=%s");              params.append(payload.plano)
+        if payload.valor_mensalidade is not None: sets.append("valor_mensalidade=%s");  params.append(payload.valor_mensalidade)
+        if payload.vencimento_dia    is not None: sets.append("vencimento_dia=%s");     params.append(payload.vencimento_dia)
+        if payload.dias_tolerancia   is not None: sets.append("dias_tolerancia=%s");    params.append(payload.dias_tolerancia)
+        if payload.status            is not None:
+            if payload.status not in ("ativo", "bloqueado", "cancelado", "teste"):
+                raise HTTPException(status_code=422, detail="status inválido.")
+            sets.append("status=%s"); params.append(payload.status)
+            if payload.status == "cancelado":
+                sets.append("cancelado_em=NOW()")
+        if sets:
+            params.append(tenant_id)
+            tx.execute(f"UPDATE tenants SET {', '.join(sets)} WHERE id=%s", params)
+    return {"status": "updated"}
+
+
+@app.patch("/tenants/{tenant_id}/status")
+def alterar_status_tenant(
+    tenant_id: int,
+    payload: TenantStatusInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    _only_admin(actor)
+    if payload.status not in ("ativo", "bloqueado", "cancelado", "teste"):
+        raise HTTPException(status_code=422, detail="status inválido.")
+    with db.transaction() as tx:
+        row = tx.fetch_one("SELECT id FROM tenants WHERE id=%s AND cancelado_em IS NULL", (tenant_id,))
+        if not row:
+            raise HTTPException(status_code=404, detail="Tenant não encontrado.")
+        extra = ", cancelado_em=NOW()" if payload.status == "cancelado" else ""
+        tx.execute(f"UPDATE tenants SET status=%s{extra} WHERE id=%s", (payload.status, tenant_id))
+    return {"status": "updated"}
+
+
+@app.delete("/tenants/{tenant_id}", status_code=204)
+def deletar_tenant(
+    tenant_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    _only_admin(actor)
+    with db.transaction() as tx:
+        row = tx.fetch_one("SELECT id, tipo FROM tenants WHERE id=%s AND cancelado_em IS NULL", (tenant_id,))
+        if not row:
+            raise HTTPException(status_code=404, detail="Tenant não encontrado.")
+        if row["tipo"] == "interno":
+            raise HTTPException(status_code=403, detail="Tenant interno não pode ser excluído.")
+        tx.execute("UPDATE tenants SET cancelado_em=NOW(), status='cancelado' WHERE id=%s", (tenant_id,))
+
+
+@app.get("/assinaturas-saas")
+def listar_assinaturas(
+    tenant_id: Optional[int] = Query(None),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    _only_admin(actor)
+    with db.transaction() as tx:
+        conds, params = [], []
+        if tenant_id:
+            conds.append("a.tenant_id=%s"); params.append(tenant_id)
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+        rows = tx.fetch_all(
+            f"""SELECT a.*, t.nome AS tenant_nome
+                FROM assinaturas_saas a
+                JOIN tenants t ON t.id = a.tenant_id
+                {where}
+                ORDER BY a.competencia DESC, a.tenant_id""",
+            params,
+        )
+    return [dict(r) for r in rows]
+
+
+@app.post("/assinaturas-saas", status_code=201)
+def criar_assinatura(
+    payload: AssinaturaInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    _only_admin(actor)
+    if not _re.match(r"^\d{4}-\d{2}$", payload.competencia):
+        raise HTTPException(status_code=422, detail="competencia deve ser YYYY-MM.")
+    venc = _parse_date_field(payload.vencimento, "vencimento")
+    with db.transaction() as tx:
+        if not tx.fetch_one("SELECT id FROM tenants WHERE id=%s AND cancelado_em IS NULL", (payload.tenant_id,)):
+            raise HTTPException(status_code=404, detail="Tenant não encontrado.")
+        existente = tx.fetch_one(
+            "SELECT id FROM assinaturas_saas WHERE tenant_id=%s AND competencia=%s",
+            (payload.tenant_id, payload.competencia),
+        )
+        if existente:
+            raise HTTPException(status_code=409, detail="Já existe assinatura para esta competência.")
+        row = tx.fetch_one(
+            """INSERT INTO assinaturas_saas (tenant_id, competencia, valor, vencimento, observacao)
+               VALUES (%s,%s,%s,%s,%s) RETURNING id""",
+            (payload.tenant_id, payload.competencia, payload.valor, venc, payload.observacao),
+        )
+    if not row:
+        raise HTTPException(status_code=500, detail="Falha ao criar assinatura.")
+    return {"id": row["id"], "status": "created"}
+
+
+@app.patch("/assinaturas-saas/{ass_id}/pagar")
+def marcar_assinatura_paga(
+    ass_id: int,
+    payload: AssinaturaPagarInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    _only_admin(actor)
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            "SELECT id, status FROM assinaturas_saas WHERE id=%s FOR UPDATE",
+            (ass_id,),
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Assinatura não encontrada.")
+        if row["status"] == "pago":
+            raise HTTPException(status_code=409, detail="Assinatura já está paga.")
+        tx.execute(
+            """UPDATE assinaturas_saas
+               SET status='pago', pago_em=NOW(),
+                   forma_pagamento=%s, observacao=COALESCE(%s, observacao)
+               WHERE id=%s""",
+            (payload.forma_pagamento, payload.observacao, ass_id),
+        )
+    return {"status": "pago"}
+
+
+@app.post("/tenants/{tenant_id}/gerar-mensalidade", status_code=201)
+def gerar_mensalidade(
+    tenant_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    """Gera cobrança do mês corrente para o tenant (idempotente)."""
+    _only_admin(actor)
+    import datetime as _dt
+    with db.transaction() as tx:
+        t = tx.fetch_one(
+            "SELECT id, valor_mensalidade, vencimento_dia FROM tenants WHERE id=%s AND cancelado_em IS NULL",
+            (tenant_id,),
+        )
+        if not t:
+            raise HTTPException(status_code=404, detail="Tenant não encontrado.")
+        if not t["valor_mensalidade"]:
+            raise HTTPException(status_code=422, detail="Tenant sem valor de mensalidade definido.")
+        hoje = _dt.date.today()
+        competencia = hoje.strftime("%Y-%m")
+        dia = min(t["vencimento_dia"] or 10, 28)
+        try:
+            vencimento = hoje.replace(day=dia)
+        except ValueError:
+            import calendar
+            ultimo = calendar.monthrange(hoje.year, hoje.month)[1]
+            vencimento = hoje.replace(day=min(dia, ultimo))
+        existente = tx.fetch_one(
+            "SELECT id FROM assinaturas_saas WHERE tenant_id=%s AND competencia=%s",
+            (tenant_id, competencia),
+        )
+        if existente:
+            return {"id": existente["id"], "status": "already_exists"}
+        row = tx.fetch_one(
+            """INSERT INTO assinaturas_saas (tenant_id, competencia, valor, vencimento)
+               VALUES (%s,%s,%s,%s) RETURNING id""",
+            (tenant_id, competencia, t["valor_mensalidade"], vencimento),
+        )
+    return {"id": row["id"], "status": "created"}
 
 
 # ═══════════════════════════════════════════════════════════
