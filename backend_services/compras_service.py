@@ -15,12 +15,16 @@ class ComprasService:
 
     def criar_compra(self, loja_id: int, usuario_id: int, evento: str,
                      valor: float, regra_rateio_id: Optional[int] = None,
-                     whatsapp_from: Optional[str] = None) -> int:
+                     whatsapp_from: Optional[str] = None,
+                     categoria: str = 'geral',
+                     bancado_por_irmao_id: Optional[int] = None) -> int:
         with self.db.transaction() as tx:
             row = tx.fetch_one(
-                """INSERT INTO compras (loja_id, usuario_id, evento, valor, regra_rateio_id, whatsapp_from)
-                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
-                (loja_id, usuario_id, evento, valor, regra_rateio_id, whatsapp_from),
+                """INSERT INTO compras (loja_id, usuario_id, evento, valor, regra_rateio_id,
+                                        whatsapp_from, categoria, bancado_por_irmao_id)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (loja_id, usuario_id, evento, valor, regra_rateio_id, whatsapp_from,
+                 categoria, bancado_por_irmao_id),
             )
             return row["id"]
 
@@ -37,6 +41,7 @@ class ComprasService:
 
     def listar_compras(self, loja_id: int, incluir_ocultos: bool = False,
                        status: Optional[str] = None, usuario_id: Optional[int] = None,
+                       categoria: Optional[str] = None,
                        data_inicio=None, data_fim=None) -> list:
         filters = ["c.loja_id = %s"]
         params: list = [loja_id]
@@ -48,6 +53,9 @@ class ComprasService:
         if usuario_id:
             filters.append("c.usuario_id = %s")
             params.append(usuario_id)
+        if categoria:
+            filters.append("c.categoria = %s")
+            params.append(categoria)
         if data_inicio:
             filters.append("c.criado_em >= %s")
             params.append(data_inicio)
@@ -62,11 +70,13 @@ class ComprasService:
                            u.nome  AS usuario_nome,
                            u.email AS usuario_email,
                            ap.nome AS aprovado_por_nome,
-                           r.nome  AS regra_nome
+                           r.nome  AS regra_nome,
+                           bp.nome AS bancado_por_nome
                     FROM compras c
                     JOIN usuarios u  ON u.id  = c.usuario_id
                     LEFT JOIN usuarios ap ON ap.id = c.aprovado_por
                     LEFT JOIN regras_rateio r ON r.id = c.regra_rateio_id
+                    LEFT JOIN irmaos bp ON bp.id = c.bancado_por_irmao_id
                     WHERE {where}
                     ORDER BY c.criado_em DESC""",
                 params,

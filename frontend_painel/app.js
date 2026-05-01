@@ -278,20 +278,11 @@ const FUNCIONALIDADES = {
     }),
   },
   criar_reembolso: {
-    icone: '💸', titulo: 'Solicitar Reembolso',
-    desc: 'Abre uma solicitação de reembolso vinculada a um caso operacional.',
-    quem: 'admin, veneravel, 1º vigilante, financeiro, secretário',
+    icone: '💸', titulo: 'Solicitar Reembolso de Ágape',
+    desc: 'Solicita reembolso para irmão que bancou um ágape.',
+    quem: 'todos os cargos',
     cor: '#059669',
-    campos: [
-      { id: 'f_caso',      label: 'ID do Caso',       tipo: 'number', valor: '' },
-      { id: 'f_categoria', label: 'Categoria',         tipo: 'text',   valor: 'agape' },
-      { id: 'f_valor',     label: 'Valor Solicitado',  tipo: 'text',   valor: '0.00' },
-      { id: 'f_irmao',     label: 'ID do Irmão',       tipo: 'number', valor: '' },
-    ],
-    acao: async (c) => api('POST', '/reimbursements', {
-      caso_id: +c.f_caso, categoria: c.f_categoria,
-      valor_solicitado: c.f_valor, irmao_id: c.f_irmao ? +c.f_irmao : null,
-    }),
+    customOnClick: 'abrirSolicitarReembolso()',
   },
   aprovar_reembolso: {
     icone: '✔️', titulo: 'Aprovar / Rejeitar Reembolso',
@@ -495,6 +486,8 @@ async function login() {
   try {
     const me = await api('GET', '/auth/me');
     state.usuario = me;
+    localStorage.setItem('sd_token', state.token);
+    localStorage.setItem('sd_usuario', JSON.stringify(me));
     renderAutenticado(me);
     msg.textContent = '';
   } catch (e) {
@@ -518,6 +511,8 @@ function mostrarView(id) {
 }
 
 function logout() {
+  localStorage.removeItem('sd_token');
+  localStorage.removeItem('sd_usuario');
   state = { token: null, usuario: null, cargoAtivo: null };
   document.getElementById('blocoUsuario').style.display = 'none';
   document.getElementById('formLogin').style.display    = 'block';
@@ -2495,14 +2490,25 @@ async function renderComprasView() {
 
 async function abrirNovaCompra() {
   const loja = state.usuario?.loja_id || 1;
-  let regras = [];
+  let regras = [], irmaos = [];
   try { regras = await api('GET', `/regras-rateio?loja_id=${loja}`); } catch(_) {}
+  try { irmaos = await api('GET', `/irmaos?loja_id=${loja}`); } catch(_) {}
 
-  abrirModal('Nova Compra / Reembolso', `
+  abrirModal('Nova Compra / Ágape', `
+    <div class="form-group"><label>Categoria</label>
+      <select class="modal-input" id="nc_categoria" onchange="toggleBancadoPor()">
+        <option value="geral">Compra geral</option>
+        <option value="agape">Ágape</option>
+      </select></div>
     <div class="form-group"><label>Evento / Descrição</label>
       <input class="modal-input" id="nc_evento" placeholder="Ex: Ágape - Sessão Magna" /></div>
     <div class="form-group"><label>Valor (R$)</label>
       <input class="modal-input" id="nc_valor" type="number" step="0.01" placeholder="0,00" /></div>
+    <div class="form-group" id="nc_bancado_group" style="display:none"><label>Quem bancou (irmão que pagou do próprio bolso)</label>
+      <select class="modal-input" id="nc_bancado">
+        <option value="">— Nenhum / não se aplica —</option>
+        ${irmaos.map(i=>`<option value="${i.id}">${i.nome}</option>`).join('')}
+      </select></div>
     <div class="form-group"><label>Regra de rateio (opcional)</label>
       <select class="modal-input" id="nc_regra">
         <option value="">Sem rateio</option>
@@ -2517,12 +2523,20 @@ async function abrirNovaCompra() {
   ]);
 }
 
+function toggleBancadoPor() {
+  const cat = document.getElementById('nc_categoria')?.value;
+  const grp = document.getElementById('nc_bancado_group');
+  if (grp) grp.style.display = cat === 'agape' ? 'block' : 'none';
+}
+
 async function submitNovaCompra() {
-  const loja   = state.usuario?.loja_id || 1;
-  const evento = document.getElementById('nc_evento').value.trim();
-  const valor  = parseFloat(document.getElementById('nc_valor').value);
-  const regra  = document.getElementById('nc_regra').value;
-  const msg    = document.getElementById('ncMsg');
+  const loja      = state.usuario?.loja_id || 1;
+  const evento    = document.getElementById('nc_evento').value.trim();
+  const valor     = parseFloat(document.getElementById('nc_valor').value);
+  const regra     = document.getElementById('nc_regra').value;
+  const categoria = document.getElementById('nc_categoria')?.value || 'geral';
+  const bancado   = document.getElementById('nc_bancado')?.value || '';
+  const msg       = document.getElementById('ncMsg');
 
   if (!evento || isNaN(valor)) { msg.textContent = 'Preencha evento e valor.'; return; }
 
@@ -2530,6 +2544,8 @@ async function submitNovaCompra() {
   fd.append('loja_id', loja);
   fd.append('evento', evento);
   fd.append('valor', valor);
+  fd.append('categoria', categoria);
+  if (bancado) fd.append('bancado_por_irmao_id', bancado);
   if (regra) fd.append('regra_rateio_id', regra);
   const arqs = document.getElementById('nc_arquivos').files;
   for (const f of arqs) fd.append('arquivos', f);
@@ -2587,6 +2603,60 @@ async function excluirCompra(id) {
   } catch(e) { alert('Erro: ' + e.message); }
 }
 
+
+async function abrirSolicitarReembolso() {
+  const loja = state.usuario?.loja_id || 1;
+  let agapes = [];
+  try { agapes = await api('GET', `/compras?loja_id=${loja}&categoria=agape&incluir_ocultos=false`); } catch(_) {}
+
+  abrirModal('Solicitar Reembolso de Ágape', `
+    <div class="form-group"><label>Selecione o ágape</label>
+      <select class="modal-input" id="sr_agape" onchange="_preencherReembolso()">
+        <option value="">— Selecione um ágape registrado —</option>
+        ${agapes.length ? agapes.map(a => `<option value="${a.id}"
+          data-valor="${a.valor}"
+          data-irmao="${a.bancado_por_irmao_id||''}"
+          data-irmao-nome="${(a.bancado_por_nome||'').replace(/"/g,'&quot;')}">
+          ${a.evento} — R$ ${parseFloat(a.valor).toFixed(2)} (${new Date(a.criado_em).toLocaleDateString('pt-BR')})
+        </option>`).join('') : '<option disabled>Nenhum ágape registrado ainda</option>'}
+      </select></div>
+    <div id="sr_info" style="display:none">
+      <div class="form-group"><label>Valor a reembolsar (R$)</label>
+        <input class="modal-input" id="sr_valor" type="number" step="0.01" /></div>
+      <div class="form-group"><label>Irmão a receber</label>
+        <input class="modal-input" id="sr_irmao_nome" readonly style="background:var(--bg-secondary,#f1f5f9)" /></div>
+    </div>
+    <div class="sb-msg" id="srMsg"></div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Solicitar', cls: 'primary', action: 'submitSolicitarReembolso()' },
+  ]);
+}
+
+function _preencherReembolso() {
+  const sel = document.getElementById('sr_agape');
+  const opt = sel.options[sel.selectedIndex];
+  const info = document.getElementById('sr_info');
+  if (!sel.value) { info.style.display = 'none'; return; }
+  info.style.display = 'block';
+  document.getElementById('sr_valor').value = opt.getAttribute('data-valor') || '';
+  const nomeIrmao = opt.getAttribute('data-irmao-nome') || '';
+  document.getElementById('sr_irmao_nome').value = nomeIrmao || '(nenhum irmão vinculado)';
+}
+
+async function submitSolicitarReembolso() {
+  const compra_id = document.getElementById('sr_agape').value;
+  const msg = document.getElementById('srMsg');
+  if (!compra_id) { msg.textContent = 'Selecione um ágape.'; return; }
+  try {
+    msg.textContent = 'Enviando…';
+    await api('POST', `/compras/${compra_id}/solicitar-reembolso`);
+    fecharModal();
+    alert('Reembolso solicitado com sucesso!');
+  } catch(e) {
+    msg.textContent = e.message;
+  }
+}
 
 // ═══════════════════════════════════════════════════════════
 //  CENTROS DE CUSTO & RATEIO
@@ -4672,7 +4742,7 @@ async function vincularUsuarioLoja(usuarioId) {
     footer.innerHTML = `
       <button class="func-btn neutral" onclick="fecharModal()">Cancelar</button>
       <button class="func-btn primary" onclick="_salvarVinculo(${usuarioId})">Salvar</button>`;
-    modal.classList.add('open');
+    modal.style.display = 'flex';
   } catch(e) { alert('Erro: ' + e.message); }
 }
 
@@ -5191,4 +5261,19 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('password').addEventListener('keydown', e => {
     if (e.key === 'Enter') login();
   });
+
+  // Auto-restaurar sessão salva
+  const savedToken = localStorage.getItem('sd_token');
+  if (savedToken) {
+    state.token = savedToken;
+    api('GET', '/auth/me').then(me => {
+      state.usuario = me;
+      localStorage.setItem('sd_usuario', JSON.stringify(me));
+      renderAutenticado(me);
+    }).catch(() => {
+      localStorage.removeItem('sd_token');
+      localStorage.removeItem('sd_usuario');
+      state.token = null;
+    });
+  }
 });

@@ -36,7 +36,7 @@
       <div class="sidebar-label">Acesso</div>
 
       <div id="formLogin">
-        <input class="sb-input" type="text"     id="apiUrl"   value="" placeholder="URL da API (deixe vazio se acessar pelo Railway)" />
+        <input class="sb-input" type="text"     id="apiUrl"   value="" placeholder="URL da API" style="display:none" />
         <input class="sb-input" type="email"    id="email"    placeholder="Seu e-mail" />
         <input class="sb-input" type="password" id="password" placeholder="Senha" />
         <button class="btn-login" id="loginBtn">Entrar</button>
@@ -67,7 +67,6 @@
     <!-- Rodapé -->
     <div class="sidebar-footer">
       <button id="themeToggle" onclick="toggleDarkMode()" class="btn-theme-toggle">🌙  Modo Escuro</button>
-      <button onclick="window.print()" class="btn-print">⎙ Imprimir esta página</button>
     </div>
 
   </aside>
@@ -265,6 +264,6 @@
   </div>
 </div>
 
-<script src="app.js?v=22"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>

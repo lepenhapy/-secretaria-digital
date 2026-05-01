@@ -599,6 +599,12 @@ def _ensure_schema(db) -> None:
             criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE(loja_id, sessao_id, data))""",
         "CREATE INDEX IF NOT EXISTS idx_cancelamentos_loja_data ON agenda_cancelamentos(loja_id, data)",
+        # ── 034: compras categoria + bancado_por ──────────────────────────────
+        "ALTER TABLE compras ADD COLUMN IF NOT EXISTS categoria VARCHAR(50) NOT NULL DEFAULT 'geral'",
+        "ALTER TABLE compras ADD COLUMN IF NOT EXISTS bancado_por_irmao_id BIGINT REFERENCES irmaos(id)",
+        # ── 035: reembolsos caso_id nullable + compra_id ──────────────────────
+        "ALTER TABLE reembolsos ALTER COLUMN caso_id DROP NOT NULL",
+        "ALTER TABLE reembolsos ADD COLUMN IF NOT EXISTS compra_id BIGINT REFERENCES compras(id)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -2362,12 +2368,15 @@ async def criar_compra(
     loja_id: int = Form(...),
     evento: str = Form(...),
     valor: float = Form(...),
+    categoria: str = Form(default='geral'),
+    bancado_por_irmao_id: Optional[int] = Form(default=None),
     regra_rateio_id: Optional[int] = Form(default=None),
     arquivos: list[UploadFile] = File(default=[]),
     actor: Actor = Depends(get_current_actor),
     svc: ComprasService = Depends(get_compras_service),
 ):
-    compra_id = svc.criar_compra(loja_id, actor.user_id, evento, valor, regra_rateio_id)
+    compra_id = svc.criar_compra(loja_id, actor.user_id, evento, valor, regra_rateio_id,
+                                  categoria=categoria, bancado_por_irmao_id=bancado_por_irmao_id)
     for arq in arquivos:
         content = await arq.read()
         mime = arq.content_type or ""
@@ -2395,13 +2404,14 @@ def listar_compras(
     loja_id: int = Query(...),
     incluir_ocultos: bool = Query(default=False),
     status: Optional[str] = Query(default=None),
+    categoria: Optional[str] = Query(default=None),
     data_inicio: Optional[str] = Query(default=None),
     data_fim: Optional[str] = Query(default=None),
     actor: Actor = Depends(get_current_actor),
     svc: ComprasService = Depends(get_compras_service),
 ):
     return svc.listar_compras(loja_id, incluir_ocultos, status,
-                               data_inicio=data_inicio, data_fim=data_fim)
+                               categoria=categoria, data_inicio=data_inicio, data_fim=data_fim)
 
 @app.patch("/compras/{compra_id}/status")
 def atualizar_status_compra(
@@ -2493,6 +2503,28 @@ def excluir_compra(
                 pathlib.Path(arq["caminho"]).unlink(missing_ok=True)
             except Exception:
                 pass
+
+@app.post("/compras/{compra_id}/solicitar-reembolso", status_code=201)
+def solicitar_reembolso_agape(
+    compra_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        compra = tx.fetch_one(
+            "SELECT id, loja_id, valor, bancado_por_irmao_id, categoria FROM compras WHERE id=%s AND deleted_at IS NULL",
+            (compra_id,),
+        )
+        if not compra:
+            raise HTTPException(status_code=404, detail="Compra não encontrada.")
+        row = tx.fetch_one(
+            """INSERT INTO reembolsos (loja_id, compra_id, irmao_id, categoria, valor_solicitado, status)
+               VALUES (%s, %s, %s, %s, %s, 'pendente') RETURNING id""",
+            (compra["loja_id"], compra_id, compra.get("bancado_por_irmao_id"),
+             compra.get("categoria", "agape"), compra["valor"]),
+        )
+    return {"reimbursement_id": row["id"]}
+
 
 # ── Notificações destinatários ────────────────────────────────────────────
 
