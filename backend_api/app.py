@@ -588,6 +588,17 @@ def _ensure_schema(db) -> None:
             criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE(loja_id, data, irmao_id))""",
         "CREATE INDEX IF NOT EXISTS idx_presencas_loja_data ON presencas(loja_id, data)",
+        # ── 033: agenda_cancelamentos ─────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS agenda_cancelamentos (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            sessao_id INT REFERENCES sessoes_recorrentes(id) ON DELETE CASCADE,
+            data DATE NOT NULL,
+            motivo TEXT,
+            criado_por INT REFERENCES usuarios(id),
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(loja_id, sessao_id, data))""",
+        "CREATE INDEX IF NOT EXISTS idx_cancelamentos_loja_data ON agenda_cancelamentos(loja_id, data)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -2164,6 +2175,41 @@ def deletar_evento_local(
 ):
     svc.deletar_evento(evento_id)
     return {"status": "deleted"}
+
+
+class CancelamentoInput(BaseModel):
+    sessao_id: Optional[int] = None
+    data: str
+    motivo: Optional[str] = None
+
+
+@app.post("/agenda/cancelamentos", status_code=201)
+def criar_cancelamento(
+    loja_id: int = Query(...),
+    payload: CancelamentoInput = ...,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            """INSERT INTO agenda_cancelamentos (loja_id, sessao_id, data, motivo, criado_por)
+               VALUES (%s,%s,%s,%s,%s)
+               ON CONFLICT (loja_id, sessao_id, data) DO UPDATE SET motivo=%s
+               RETURNING id""",
+            (loja_id, payload.sessao_id, payload.data, payload.motivo, actor.user_id,
+             payload.motivo),
+        )
+    return {"id": row["id"]}
+
+
+@app.delete("/agenda/cancelamentos/{cancel_id}", status_code=204)
+def deletar_cancelamento(
+    cancel_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        tx.execute("DELETE FROM agenda_cancelamentos WHERE id=%s", (cancel_id,))
 
 
 

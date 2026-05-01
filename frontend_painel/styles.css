@@ -821,6 +821,8 @@ body {
   width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
 }
 .agenda-cel.selecionado { background: #eff6ff; }
+.agenda-cel.feriado { background: #fffbeb; }
+.agenda-cel.feriado .agenda-cel-num { color: #b45309; }
 .agenda-cel-num { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1; }
 .agenda-dots { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
 .agenda-dot { width: 7px; height: 7px; border-radius: 50%; }

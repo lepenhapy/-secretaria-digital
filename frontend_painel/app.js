@@ -462,11 +462,10 @@ async function registrar() {
       document.getElementById('cadastroConfirmado').style.display = 'block';
       document.getElementById('cadastroEmailEnviado').textContent = email;
       document.querySelector('#cadastroConfirmado .modal-body div[style]').innerHTML =
-        `<div style="font-size:52px">✅</div>
-         <div style="font-size:18px;font-weight:700;margin-top:12px">Conta criada com sucesso!</div>
-         <div style="color:#64748b;margin-top:8px;line-height:1.6">
-           Sua conta está ativa. Faça login com o e-mail<br/>
-           <strong>${email}</strong>.
+        `<div style="font-size:32px">✅</div>
+         <div style="font-size:16px;font-weight:700;margin-top:10px">Conta criada com sucesso!</div>
+         <div style="color:#64748b;margin-top:6px;font-size:13px;line-height:1.5">
+           Sua conta está ativa.<br/>Faça login com <strong>${email}</strong>.
          </div>`;
     } else {
       document.getElementById('cadastroEmailEnviado').textContent = email;
@@ -591,7 +590,7 @@ function renderSidebar() {
       <span style="font-size:15px">🏛️</span><span>Lojas & Complexos</span>
     </div>
     <div class="sidebar-nav-module" id="nav-tenants" onclick="abrirModulo('tenants')">
-      <span style="font-size:15px">💳</span><span>Gestão SaaS</span>
+      <span style="font-size:15px">💳</span><span>Assinantes SaaS</span>
     </div>` : ''}
     ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo) || state.usuario?.loja_tipo === 'complexo' ? `
     <div class="sidebar-nav-module" id="nav-complexo_dash" onclick="abrirModulo('complexo_dash')">
@@ -1733,6 +1732,37 @@ let agendaState = {
   dados: null,
 };
 
+function feriadosBR(ano) {
+  function pascoa(y) {
+    const c = Math.floor(y/100), n = y - 19*Math.floor(y/19);
+    const k = Math.floor((c-17)/25);
+    let i = c - Math.floor(c/4) - Math.floor((c-k)/3) + 19*n + 15;
+    i = i - 30*Math.floor(i/30);
+    i = i - Math.floor(i/28)*(1 - Math.floor(i/28)*Math.floor(29/(i+1))*Math.floor((21-n)/11));
+    let j = y + Math.floor(y/4) + i + 2 - c + Math.floor(c/4);
+    j = j - 7*Math.floor(j/7);
+    const l = i - j, m = 3 + Math.floor((l+40)/44), d = l + 28 - 31*Math.floor(m/4);
+    return new Date(y, m-1, d);
+  }
+  const p = pascoa(ano);
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const add = (dt, dias) => { const d = new Date(dt); d.setDate(d.getDate()+dias); return d; };
+  return {
+    [`${ano}-01-01`]: 'Confraternização Universal',
+    [fmt(add(p,-48))]: 'Carnaval',
+    [fmt(add(p,-47))]: 'Carnaval',
+    [fmt(add(p,-2))]:  'Sexta-feira Santa',
+    [`${ano}-04-21`]: 'Tiradentes',
+    [`${ano}-05-01`]: 'Dia do Trabalho',
+    [fmt(add(p, 60))]: 'Corpus Christi',
+    [`${ano}-09-07`]: 'Independência do Brasil',
+    [`${ano}-10-12`]: 'N.Sra. Aparecida',
+    [`${ano}-11-02`]: 'Finados',
+    [`${ano}-11-15`]: 'Proclamação da República',
+    [`${ano}-12-25`]: 'Natal',
+  };
+}
+
 function renderAgendaView() {
   const view = document.getElementById('agendaView');
   const pad = n => String(n).padStart(2,'0');
@@ -1880,15 +1910,25 @@ function agendaRenderGrid(dados) {
   if (!el) return;
   const { num_dias, primeiro_dia_semana, dias } = dados;
   const hoje = new Date();
+  const feriados = feriadosBR(agendaState.ano);
   let html = '';
   for (let i = 0; i < primeiro_dia_semana; i++) html += '<div class="agenda-cel vazio"></div>';
   for (let d = 1; d <= num_dias; d++) {
     const eventos = dias[String(d)] || [];
     const sel = agendaState.diaSelecionado === d;
     const isHoje = d === hoje.getDate() && agendaState.mes === (hoje.getMonth()+1) && agendaState.ano === hoje.getFullYear();
-    const cores = [...new Set(eventos.map(ev => ev.cor || '#2563eb'))].slice(0,3);
-    const dots = cores.map(c => `<span class="agenda-dot" style="background:${c}"></span>`).join('');
-    html += `<div class="agenda-cel${sel?' selecionado':''}${isHoje?' hoje':''}" onclick="agendaClicarDia(${d})">
+    const isoDate = `${agendaState.ano}-${String(agendaState.mes).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const feriado = feriados[isoDate];
+    const temCancelado = eventos.some(ev => ev.cancelado);
+    const ativos = eventos.filter(ev => !ev.cancelado);
+    const cores = [...new Set(ativos.map(ev => ev.cor || '#2563eb'))].slice(0,3);
+    const dots = [
+      ...cores.map(c => `<span class="agenda-dot" style="background:${c}"></span>`),
+      ...(temCancelado ? [`<span class="agenda-dot" style="background:#94a3b8"></span>`] : []),
+      ...(feriado ? [`<span style="font-size:8px">🇧🇷</span>`] : []),
+    ].join('');
+    html += `<div class="agenda-cel${sel?' selecionado':''}${isHoje?' hoje':''}${feriado?' feriado':''}"
+      onclick="agendaClicarDia(${d})" title="${feriado||''}">
       <span class="agenda-cel-num">${d}</span>
       <div class="agenda-dots">${dots}</div>
     </div>`;
@@ -1910,32 +1950,64 @@ function agendaClicarDia(d) {
 function agendaRenderDiaDetalhe(d) {
   const det = document.getElementById('agendaDiaDetalhe');
   if (!det) return;
+  const isoDate = `${agendaState.ano}-${String(agendaState.mes).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  const feriado = feriadosBR(agendaState.ano)[isoDate];
   document.getElementById('agendaDiaDetalheTitulo').textContent =
     `${d} de ${MESES_PT[agendaState.mes - 1]} de ${agendaState.ano}`;
   const eventos = agendaState.dados?.dias?.[String(d)] || [];
   const eventoEl = document.getElementById('agendaDiaEventos');
+  const podeEditar = ['admin_principal','veneravel_mestre','secretario'].includes(state.usuario?.cargo);
+  const feriadoHtml = feriado
+    ? `<div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px;display:flex;align-items:center;gap:8px">
+         🇧🇷 <strong>Feriado Nacional:</strong> ${feriado}
+       </div>` : '';
   if (!eventos.length) {
-    eventoEl.innerHTML = '<div style="color:#94a3b8;font-size:14px;padding:8px 0">Nenhum evento neste dia.</div>';
+    eventoEl.innerHTML = feriadoHtml + '<div style="color:#94a3b8;font-size:14px;padding:8px 0">Nenhum evento neste dia.</div>';
   } else {
-    eventoEl.innerHTML = eventos.map(ev => `
-      <div class="agenda-evento-item" style="border-left:3px solid ${ev.cor||'#2563eb'}">
+    eventoEl.innerHTML = feriadoHtml + eventos.map(ev => `
+      <div class="agenda-evento-item" style="border-left:3px solid ${ev.cancelado ? '#94a3b8' : ev.cor||'#2563eb'};${ev.cancelado ? 'opacity:0.6' : ''}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
             <div class="agenda-evento-hora">${ev.hora_inicio}–${ev.hora_fim}</div>
-            <div class="agenda-evento-titulo">${ev.titulo}</div>
+            <div class="agenda-evento-titulo" style="${ev.cancelado ? 'text-decoration:line-through;color:#94a3b8' : ''}">${ev.titulo}</div>
+            ${ev.cancelado ? `<div style="font-size:12px;color:#dc2626;margin-top:2px">⊘ Sessão cancelada${ev.cancelamento_motivo ? ' · ' + ev.cancelamento_motivo : ''}</div>` : ''}
             ${ev.descricao ? `<div class="agenda-evento-desc">${ev.descricao}</div>` : ''}
             ${ev.local     ? `<div class="agenda-evento-desc">📍 ${ev.local}</div>` : ''}
             ${ev.freq_label? `<div class="agenda-evento-desc">🔄 ${ev.freq_label}</div>` : ''}
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-            <span class="tag" style="background:${ev.cor||'#2563eb'}18;color:${ev.cor||'#2563eb'};border-color:${ev.cor||'#2563eb'}33">${ev.tipo_fonte==='recorrente'?'Recorrente':'Avulso'}</span>
+            <span class="tag" style="background:${ev.cor||'#2563eb'}18;color:${ev.cor||'#2563eb'};border-color:${ev.cor||'#2563eb'}33">
+              ${ev.tipo_fonte==='recorrente'?'Recorrente':'Avulso'}
+            </span>
             ${ev.tipo_fonte==='avulso' ? `<button class="func-btn danger" style="font-size:11px;padding:2px 8px" onclick="agendaDeletarEvento(${ev.id})">Remover</button>` : ''}
+            ${ev.tipo_fonte==='recorrente' && podeEditar ? (
+              ev.cancelado
+                ? `<button class="func-btn primary" style="font-size:11px;padding:2px 8px;background:#16a34a" onclick="restaurarSessao(${ev.cancelamento_id})">Restaurar</button>`
+                : `<button class="func-btn neutral" style="font-size:11px;padding:2px 8px;color:#dc2626" onclick="cancelarSessaoNaData(${ev.id},'${isoDate}')">Cancelar data</button>`
+            ) : ''}
           </div>
         </div>
       </div>
     `).join('');
   }
   det.style.display = 'block';
+}
+
+async function cancelarSessaoNaData(sessaoId, data) {
+  const loja = state.usuario?.loja_id || 1;
+  const motivo = prompt('Motivo do cancelamento (opcional):') ?? '';
+  if (motivo === null) return;
+  try {
+    await api('POST', `/agenda/cancelamentos?loja_id=${loja}`, { sessao_id: sessaoId, data, motivo: motivo || null });
+    agendaCarregarMes();
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function restaurarSessao(cancelamentoId) {
+  try {
+    await api('DELETE', `/agenda/cancelamentos/${cancelamentoId}`);
+    agendaCarregarMes();
+  } catch(e) { alert('Erro: ' + e.message); }
 }
 
 function agendaMesAnterior() {
@@ -4346,12 +4418,12 @@ async function abrirModalLoja(id) {
         <div class="form-group">
           <label>Tipo *</label>
           <select class="modal-input" id="lj_tipo" onchange="_ljaToggleComplexo()">
-            <option value="loja"    ${(!l||l.tipo==='loja')   ?'selected':''}>Loja</option>
-            <option value="complexo"${l?.tipo==='complexo'?'selected':''}>Complexo</option>
+            <option value="loja"    ${(!l||l.tipo==='loja')   ?'selected':''}>Loja (unidade subordinada)</option>
+            <option value="complexo"${l?.tipo==='complexo'?'selected':''}>Complexo (organização mãe)</option>
           </select>
         </div>
         <div class="form-group" id="lj_complexo_wrap" style="${(l?.tipo==='complexo')?'display:none':''};grid-column:1/-1">
-          <label>Complexo pai</label>
+          <label>Complexo ao qual esta loja pertence</label>
           <select class="modal-input" id="lj_complexo_id">
             <option value="">— Sem complexo —</option>
             ${complexos.map(c=>`<option value="${c.id}" ${l?.complexo_id===c.id?'selected':''}>${c.nome}${c.numero?' nº'+c.numero:''}</option>`).join('')}
@@ -4384,7 +4456,7 @@ async function abrirModalLoja(id) {
         </div>
         ${tenants.length ? `
         <div class="form-group" style="grid-column:1/-1">
-          <label>Tenant SaaS</label>
+          <label>Assinante SaaS (conta que paga pelo sistema)</label>
           <select class="modal-input" id="lj_tenant_id">
             <option value="">— Sem tenant —</option>
             ${tenants.map(t=>`<option value="${t.id}" ${l?.tenant_id===t.id?'selected':''}>${t.nome} (${t.tipo})</option>`).join('')}
@@ -4723,7 +4795,7 @@ function _tenantBadge(status) {
 
 async function renderTenantsView() {
   const view = document.getElementById('tenantsView');
-  view.innerHTML = `<div class="loading">Carregando tenants…</div>`;
+  view.innerHTML = `<div class="loading">Carregando…</div>`;
   try {
     const lista = await api('GET', '/tenants');
     const stats = {
@@ -4769,13 +4841,13 @@ async function renderTenantsView() {
       <div class="view-header" style="margin-bottom:20px">
         <div>
           <h1>Gestão SaaS</h1>
-          <div style="font-size:13px;color:var(--muted)">Tenants, planos e assinaturas</div>
+          <div style="font-size:13px;color:var(--muted)">Assinantes — cada organização que usa o sistema</div>
         </div>
-        <button class="btn-primary" onclick="abrirModalTenant(null)">+ Novo Tenant</button>
+        <button class="btn-primary" onclick="abrirModalTenant(null)">+ Novo Assinante</button>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:24px">
-        ${_dashCard('🏢', stats.total,  'Total de tenants',  '#0369a1')}
+        ${_dashCard('🏢', stats.total,  'Total de assinantes', '#0369a1')}
         ${_dashCard('✅', stats.ativos, 'Ativos',            '#16a34a')}
         ${_dashCard('🚫', stats.bloq,   'Bloqueados',        '#dc2626')}
         ${_dashCard('🧪', stats.teste,  'Em teste',          '#7c3aed')}
@@ -4785,7 +4857,7 @@ async function renderTenantsView() {
 
       <div style="background:var(--white);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)">
         <div style="padding:14px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px">
-          📋 Tenants cadastrados
+          📋 Assinantes cadastrados
         </div>
         ${lista.length ? `
         <div style="overflow-x:auto">
@@ -4803,7 +4875,7 @@ async function renderTenantsView() {
             <tbody>${rows}</tbody>
           </table>
         </div>` :
-        `<div class="empty-msg">Nenhum tenant cadastrado ainda.</div>`}
+        `<div class="empty-msg">Nenhum assinante cadastrado ainda.</div>`}
       </div>`;
   } catch(e) {
     view.innerHTML = `<div class="error-msg">Erro ao carregar tenants: ${e.message}</div>`;
@@ -4984,7 +5056,7 @@ async function abrirModalTenant(id) {
   const title  = document.getElementById('modalTitle');
   const body   = document.getElementById('modalBody');
   const footer = document.getElementById('modalFooter');
-  title.textContent = id ? 'Editar Tenant' : 'Novo Tenant';
+  title.textContent = id ? 'Editar Assinante' : 'Novo Assinante';
   body.innerHTML = `
     <div class="form-group">
       <label class="modal-label">Nome *</label>
@@ -5031,7 +5103,7 @@ async function abrirModalTenant(id) {
   footer.innerHTML = `
     <button class="func-btn neutral" onclick="fecharModal()">Cancelar</button>
     <button class="func-btn primary" onclick="_salvarTenant(${id||'null'})">Salvar</button>`;
-  modal.classList.add('open');
+  modal.style.display = 'flex';
 }
 
 async function _salvarTenant(id) {

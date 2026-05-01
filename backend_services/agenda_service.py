@@ -177,6 +177,20 @@ class AgendaService:
                    ORDER BY hora_inicio""",
                 (loja_id, ano, mes),
             )
+            cancelamentos = tx.fetch_all(
+                """SELECT id, sessao_id, data, motivo
+                   FROM agenda_cancelamentos
+                   WHERE loja_id=%s
+                     AND EXTRACT(YEAR FROM data)=%s
+                     AND EXTRACT(MONTH FROM data)=%s""",
+                (loja_id, ano, mes),
+            )
+
+        # Mapa de cancelamentos: (sessao_id, dia) → {id, motivo}
+        cancelados: dict = {}
+        for c in cancelamentos:
+            dia = c['data'].day if hasattr(c['data'], 'day') else int(str(c['data'])[8:10])
+            cancelados[(c['sessao_id'], dia)] = {'cancelamento_id': c['id'], 'motivo': c['motivo']}
 
         # Monta mapa dia → lista de eventos
         dias: dict[int, list] = {}
@@ -186,6 +200,7 @@ class AgendaService:
                 dia = dt.day
                 if dia not in dias:
                     dias[dia] = []
+                cancel_info = cancelados.get((sess['id'], dia))
                 dias[dia].append({
                     'id': sess['id'],
                     'tipo_fonte': 'recorrente',
@@ -196,6 +211,9 @@ class AgendaService:
                     'cor': sess['cor'],
                     'descricao': sess['descricao'],
                     'freq_label': self._freq_label(sess),
+                    'cancelado': cancel_info is not None,
+                    'cancelamento_id': cancel_info['cancelamento_id'] if cancel_info else None,
+                    'cancelamento_motivo': cancel_info['motivo'] if cancel_info else None,
                 })
 
         for ev in eventos:
