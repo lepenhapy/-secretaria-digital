@@ -65,6 +65,27 @@ class EmailService:
                 server.login(self.user, self.password)
             server.sendmail(self.from_, to_email, msg.as_string())
 
+    def send_simple(self, to_email: str, nome: str, subject: str, body_text: str) -> None:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = self.from_
+        msg['To']      = to_email
+        html = (f'<html><body style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px">'
+                f'<p>Olá, <strong>{nome}</strong>.</p>'
+                f'<div style="background:#f8fafc;border-left:4px solid #2563eb;padding:16px;'
+                f'border-radius:4px;white-space:pre-wrap">{body_text}</div>'
+                f'<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>'
+                f'<p style="color:#94a3b8;font-size:11px">Secretaria Digital</p>'
+                f'</body></html>')
+        msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
+        msg.attach(MIMEText(html, 'html', 'utf-8'))
+        with smtplib.SMTP(self.host, self.port, timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            if self.user and self.password:
+                server.login(self.user, self.password)
+            server.sendmail(self.from_, to_email, msg.as_string())
+
     def send_boleto(self, to_email: str, nome_irmao: str,
                     pdf_bytes: bytes, filename: str, caption: str) -> None:
         from email.mime.application import MIMEApplication

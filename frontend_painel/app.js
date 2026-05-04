@@ -52,8 +52,8 @@ const CARGOS = [
       { icone: '🔄', titulo: 'Substituição do VM',       desc: 'Assume a presidência na ausência do Venerável Mestre.' },
       { icone: '📋', titulo: 'Decisão de contratos',     desc: 'Pode aprovar ou rejeitar contratos quando delegado.' },
     ],
-    funcionalidades: ['tarefas','decidir_contrato','criar_mensagem','criar_caso','criar_reembolso',
-                      'aprovar_reembolso','upload_arquivo'],
+    funcionalidades: ['tarefas','ver_contratos','criar_contrato','enviar_contrato','decidir_contrato',
+                      'criar_mensagem','criar_caso','criar_reembolso','aprovar_reembolso','upload_arquivo'],
   },
   {
     id: 'segundo_vigilante',
@@ -196,10 +196,11 @@ const FUNCIONALIDADES = {
   criar_contrato: {
     icone: '📋', titulo: 'Criar Contrato',
     desc: 'Registra um novo contrato de uso de recursos (templo/sala) para a loja, definindo datas, horários e regra de recorrência.',
-    quem: 'admin_principal, veneravel_mestre, secretario',
+    quem: 'admin_principal, veneravel_mestre, secretario, primeiro_vigilante',
     cor: '#2563eb',
+    initModal: () => { const el = document.getElementById('f_loja'); if (el && state.usuario?.loja_id) el.value = state.usuario.loja_id; },
     campos: [
-      { id: 'f_loja',     label: 'Número da Loja',   tipo: 'number', valor: '1' },
+      { id: 'f_loja',     label: 'ID da Loja (preenchido automaticamente)',   tipo: 'number', valor: '' },
       { id: 'f_templo',   label: 'Número do Templo', tipo: 'number', valor: '1' },
       { id: 'f_regra',    label: 'Regra de Recorrência', tipo: 'text', valor: 'primeira segunda' },
       { id: 'f_inicio',   label: 'Hora de Início', tipo: 'text', valor: '20:00' },
@@ -1566,8 +1567,16 @@ async function cancelarMensalidade(pagamentoId) {
 //  MÓDULO — BOLETOS
 // ═══════════════════════════════════════════════════════════
 
-function renderBoletosView() {
+async function renderBoletosView() {
   const view = document.getElementById('irmaoView');
+  view.innerHTML = '<div class="loading">Carregando…</div>';
+  let lojas = [];
+  try { lojas = await api('GET', '/lojas'); } catch(_) {}
+  const lojaId = state.usuario?.loja_id;
+  const lojaOpts = lojas.length
+    ? lojas.map(l=>`<option value="${l.id}" ${l.id==lojaId?'selected':''}>${l.nome}</option>`).join('')
+    : `<option value="${lojaId||1}">Loja padrão</option>`;
+
   view.innerHTML = `
     <div class="irmao-header">
       <h1>📄 Boletos</h1>
@@ -1578,7 +1587,7 @@ function renderBoletosView() {
       <div class="cards-grid" style="margin-top:12px">
         <div class="resp-card"><div class="resp-card-icon">1️⃣</div><div class="resp-card-title">Receba os boletos</div><div class="resp-card-desc">O banco envia os PDFs via WhatsApp para o número da Secretaria Digital.</div></div>
         <div class="resp-card"><div class="resp-card-icon">2️⃣</div><div class="resp-card-title">Identificação automática</div><div class="resp-card-desc">O sistema lê o PDF, identifica o irmão pelo nome ou CIM e cruza com o cadastro.</div></div>
-        <div class="resp-card"><div class="resp-card-icon">3️⃣</div><div class="resp-card-title">Envio automático</div><div class="resp-card-desc">O boleto é encaminhado para o WhatsApp do irmão com uma mensagem personalizada.</div></div>
+        <div class="resp-card"><div class="resp-card-icon">3️⃣</div><div class="resp-card-title">Envio automático</div><div class="resp-card-desc">O boleto é encaminhado para o WhatsApp/e-mail do irmão com mensagem personalizada.</div></div>
       </div>
     </div>
 
@@ -1586,8 +1595,8 @@ function renderBoletosView() {
       <h2>Upload manual de boleto</h2>
       <div class="form-grid">
         <div class="form-group">
-          <label class="form-label">ID da Loja</label>
-          <input class="form-input" id="b_loja" type="number" value="${state.usuario?.loja_id || 1}" />
+          <label class="form-label">Loja</label>
+          <select class="form-input" id="b_loja">${lojaOpts}</select>
         </div>
         <div class="form-group">
           <label class="form-label">Arquivo PDF</label>
@@ -1605,15 +1614,22 @@ function renderBoletosView() {
         <h2 style="margin:0">Histórico de processamento</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="func-btn neutral" onclick="carregarBoletos()">↻ Atualizar</button>
-          <button class="func-btn primary" onclick="dispararTodosBoletos()" title="Envia via WhatsApp ou e-mail para todos os irmãos identificados ainda não notificados">📤 Disparar Todos</button>
+          <button class="func-btn neutral" onclick="limparHistoricoBoletos()" title="Oculta registros antigos desta tela (dados ficam salvos no servidor)">🧹 Limpar tela</button>
+          <button class="func-btn primary" onclick="dispararTodosBoletos()" title="Envia via WhatsApp ou e-mail para todos identificados ainda não notificados">📤 Disparar Todos</button>
         </div>
       </div>
       <div id="boletoLista" style="margin-top:12px;color:#64748b;font-size:14px">
-        <button class="func-btn neutral" onclick="carregarBoletos()">Carregar histórico</button>
+        <p style="color:#64748b;font-size:14px">Carregando…</p>
       </div>
     </div>
   `;
   carregarBoletos();
+}
+
+function limparHistoricoBoletos() {
+  localStorage.setItem('boletos_limpo_ate', new Date().toISOString());
+  const el = document.getElementById('boletoLista');
+  if (el) el.innerHTML = '<p style="color:#64748b;font-size:14px">Tela limpa. Os registros estão salvos no servidor — clique em ↻ Atualizar para recarregar.</p>';
 }
 
 async function uploadBoleto() {
@@ -1642,8 +1658,10 @@ async function carregarBoletos() {
   try {
     const loja = document.getElementById('b_loja')?.value || state.usuario?.loja_id || 1;
     const data = await api('GET', `/boletos?loja_id=${loja}`);
-    if (!data.length) { el.innerHTML = '<p style="color:#64748b;font-size:14px">Nenhum boleto processado ainda.</p>'; return; }
-    el.innerHTML = data.map(b => {
+    const limpoAte = localStorage.getItem('boletos_limpo_ate');
+    const filtrado = limpoAte ? data.filter(b => new Date(b.created_at) > new Date(limpoAte)) : data;
+    if (!filtrado.length) { el.innerHTML = '<p style="color:#64748b;font-size:14px">Nenhum boleto processado ainda.</p>'; return; }
+    el.innerHTML = filtrado.map(b => {
       const icone = b.status === 'enviado' ? '✅' : b.status === 'nao_identificado' ? '❓' : '⚠️';
       const notif = b.notificado_em
         ? `<span style="color:#16a34a;font-size:11px">✅ Enviado via ${b.notificado_canal} em ${new Date(b.notificado_em).toLocaleString('pt-BR')}</span>`
@@ -2415,6 +2433,9 @@ function abrirModal(fidOuTitulo, corpo, botoes) {
     `;
   }
   document.getElementById('modalOverlay').style.display = 'flex';
+  if (typeof fidOuTitulo === 'string' && FUNCIONALIDADES[fidOuTitulo]?.initModal) {
+    FUNCIONALIDADES[fidOuTitulo].initModal();
+  }
 }
 
 async function executarModal() {
@@ -2531,7 +2552,7 @@ async function renderComprasView() {
             <button class="btn-sm danger"  onclick="rejeitarCompra(${c.id})">Rejeitar</button>
           ` : ''}
           <button class="btn-sm neutral" onclick="toggleVisibilidade(${c.id}, ${!c.visivel})">${c.visivel ? 'Ocultar' : 'Mostrar'}</button>
-          ${['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo)
+          ${(['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo) || c.usuario_id === state.usuario?.user_id)
             ? `<button class="btn-sm danger" onclick="excluirCompra(${c.id})">🗑 Excluir</button>`
             : ''}
         </div>
@@ -3236,7 +3257,7 @@ async function carregarRepositorio() {
               </td>
               <td>
                 <div>${a.descricao || '—'}</div>
-                ${a.bancado_por_nome ? `<div style="font-size:11px;color:#64748b;margin-top:2px">💰 Bancado por: ${a.bancado_por_nome}</div>` : ''}
+                ${a.bancado_por_nome ? `<div style="font-size:11px;color:#64748b;margin-top:2px">💰 Pago por: ${a.bancado_por_nome}</div>` : ''}
               </td>
               <td>${a.nome_original || a.tipo || '—'}</td>
               <td>${a.tamanho_bytes ? (a.tamanho_bytes / 1024).toFixed(1) + ' KB' : '—'}</td>
@@ -4329,8 +4350,12 @@ async function renderTarefasView() {
   }
 }
 
-function _modalTarefa(t = null) {
+function _modalTarefa(t = null, irmaos = []) {
   const id = t ? t.id : '';
+  const respOpts = `<option value="">— Sem responsável —</option>` +
+    irmaos.map(i =>
+      `<option value="${i.usuario_id}" ${t?.responsavel_usuario_id == i.usuario_id ? 'selected' : ''}>${i.nome}</option>`
+    ).join('');
   return `
     <div id="modalTarefaOverlay" class="modal-overlay" onclick="fecharModalTarefa()" style="display:none">
       <div class="modal-box" onclick="event.stopPropagation()">
@@ -4354,6 +4379,8 @@ function _modalTarefa(t = null) {
             <div><div class="modal-label">Vencimento</div>
               <input class="modal-input" id="tf_venc" type="date" value="${t?.vencimento?t.vencimento.substring(0,10):''}" /></div>
           </div>
+          <div><div class="modal-label">Responsável</div>
+            <select class="modal-input" id="tf_resp">${respOpts}</select></div>
           <div id="tf_msg" class="modal-result" style="display:none"></div>
         </div>
         <div class="modal-footer">
@@ -4364,23 +4391,32 @@ function _modalTarefa(t = null) {
     </div>`;
 }
 
-function abrirNovaTarefa() {
+async function abrirNovaTarefa() {
   const view = document.getElementById('tarefasView');
   const old = document.getElementById('modalTarefaOverlay');
   if (old) old.remove();
-  view.insertAdjacentHTML('beforeend', _modalTarefa());
+  let irmaos = [];
+  try {
+    const todos = await api('GET', `/irmaos?loja_id=${state.usuario?.loja_id || ''}`);
+    irmaos = todos.filter(i => i.usuario_id);
+  } catch(_) {}
+  view.insertAdjacentHTML('beforeend', _modalTarefa(null, irmaos));
   document.getElementById('modalTarefaOverlay').style.display = 'flex';
 }
 
 async function abrirEditarTarefa(id) {
   try {
-    const lista = await api('GET', `/tarefas?status=`);
+    const [lista, todosIrmaos] = await Promise.all([
+      api('GET', `/tarefas?status=`),
+      api('GET', `/irmaos?loja_id=${state.usuario?.loja_id || ''}`).catch(() => []),
+    ]);
     const t = lista.find(x => x.id === id);
     if (!t) return;
+    const irmaos = todosIrmaos.filter(i => i.usuario_id);
     const view = document.getElementById('tarefasView');
     const old = document.getElementById('modalTarefaOverlay');
     if (old) old.remove();
-    view.insertAdjacentHTML('beforeend', _modalTarefa(t));
+    view.insertAdjacentHTML('beforeend', _modalTarefa(t, irmaos));
     document.getElementById('modalTarefaOverlay').style.display = 'flex';
   } catch(e) { alert('Erro: ' + e.message); }
 }
@@ -4394,11 +4430,13 @@ async function salvarTarefa(id) {
   const titulo = document.getElementById('tf_titulo').value.trim();
   const msg    = document.getElementById('tf_msg');
   if (!titulo) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Título obrigatório.'; return; }
+  const respVal = document.getElementById('tf_resp')?.value || '';
   const payload = {
     titulo,
-    descricao:  document.getElementById('tf_desc').value.trim() || null,
-    prioridade: document.getElementById('tf_prior').value,
-    vencimento: document.getElementById('tf_venc').value || null,
+    descricao:              document.getElementById('tf_desc').value.trim() || null,
+    prioridade:             document.getElementById('tf_prior').value,
+    vencimento:             document.getElementById('tf_venc').value || null,
+    responsavel_usuario_id: respVal ? +respVal : null,
   };
   try {
     if (id) await api('PUT', `/tarefas/${id}`, payload);

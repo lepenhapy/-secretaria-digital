@@ -2626,12 +2626,18 @@ def excluir_compra(
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
 ):
-    if actor.cargo not in ("admin_principal", "veneravel_mestre"):
-        raise HTTPException(status_code=403, detail="Sem permissão para excluir compras.")
     with db.transaction() as tx:
-        compra = tx.fetch_one("SELECT id, loja_id FROM compras WHERE id=%s AND deleted_at IS NULL", (compra_id,))
+        compra = tx.fetch_one(
+            "SELECT id, loja_id, usuario_id FROM compras WHERE id=%s AND deleted_at IS NULL", (compra_id,)
+        )
         if not compra:
             raise HTTPException(status_code=404, detail="Compra não encontrada.")
+        can_delete = (
+            actor.cargo in ("admin_principal", "veneravel_mestre")
+            or compra["usuario_id"] == actor.user_id
+        )
+        if not can_delete:
+            raise HTTPException(status_code=403, detail="Sem permissão para excluir esta compra.")
         if actor.loja_id is not None and compra["loja_id"] != actor.loja_id:
             raise HTTPException(status_code=403, detail="Sem permissão para excluir esta compra.")
         arquivos = tx.fetch_all(
@@ -3464,6 +3470,56 @@ def _loja_scope(actor: Actor) -> tuple:
     return "", []
 
 
+def _notificar_tarefa_atribuida(titulo, descricao, vencimento,
+                                 responsavel_usuario_id, criado_por_usuario_id,
+                                 db, wpp, email_svc):
+    try:
+        with db.transaction() as tx:
+            resp = tx.fetch_one(
+                """SELECT u.email, u.nome, i.whatsapp
+                   FROM usuarios u LEFT JOIN irmaos i ON i.usuario_id = u.id
+                   WHERE u.id = %s""", [responsavel_usuario_id])
+            criador = tx.fetch_one("SELECT nome FROM usuarios WHERE id = %s", [criado_por_usuario_id])
+        if not resp:
+            return
+        venc_txt = f"\n⏰ Vence em: {vencimento}" if vencimento else ""
+        criador_nome = criador['nome'] if criador else 'Sistema'
+        msg = (f"📋 *Nova tarefa atribuída a você*\n"
+               f"Tarefa: {titulo}"
+               + (f"\n{descricao}" if descricao else "")
+               + f"\nAtribuído por: {criador_nome}" + venc_txt)
+        if wpp and resp.get('whatsapp'):
+            try: wpp.send_text(resp['whatsapp'], msg)
+            except Exception: pass
+        if email_svc and email_svc.configurado() and resp.get('email'):
+            try: email_svc.send_simple(resp['email'], resp['nome'], f"Nova tarefa: {titulo}", msg)
+            except Exception: pass
+    except Exception:
+        pass
+
+
+def _notificar_tarefa_concluida(titulo, criado_por_usuario_id, concluido_por_usuario_id, db, wpp, email_svc):
+    try:
+        with db.transaction() as tx:
+            criador = tx.fetch_one(
+                """SELECT u.email, u.nome, i.whatsapp
+                   FROM usuarios u LEFT JOIN irmaos i ON i.usuario_id = u.id
+                   WHERE u.id = %s""", [criado_por_usuario_id])
+            concluid = tx.fetch_one("SELECT nome FROM usuarios WHERE id = %s", [concluido_por_usuario_id])
+        if not criador:
+            return
+        concluid_nome = concluid['nome'] if concluid else 'um irmão'
+        msg = f"✅ *Tarefa concluída!*\nTarefa: {titulo}\nConcluída por: {concluid_nome}"
+        if wpp and criador.get('whatsapp'):
+            try: wpp.send_text(criador['whatsapp'], msg)
+            except Exception: pass
+        if email_svc and email_svc.configurado() and criador.get('email'):
+            try: email_svc.send_simple(criador['email'], criador['nome'], f"Tarefa concluída: {titulo}", msg)
+            except Exception: pass
+    except Exception:
+        pass
+
+
 class TarefaCreateInput(BaseModel):
     titulo: str
     descricao: Optional[str] = None
@@ -3524,6 +3580,8 @@ def criar_tarefa(
     payload: TarefaCreateInput,
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
+    wpp=Depends(get_whatsapp_service),
+    email_svc=Depends(get_email_service),
 ):
     if actor.loja_id is None:
         raise HTTPException(
@@ -3546,6 +3604,12 @@ def criar_tarefa(
         )
     if not row:
         raise HTTPException(status_code=500, detail="Falha ao criar tarefa.")
+    if payload.responsavel_usuario_id and payload.responsavel_usuario_id != actor.user_id:
+        _notificar_tarefa_atribuida(
+            titulo=payload.titulo, descricao=payload.descricao,
+            vencimento=venc, responsavel_usuario_id=payload.responsavel_usuario_id,
+            criado_por_usuario_id=actor.user_id, db=db, wpp=wpp, email_svc=email_svc,
+        )
     return {"id": row["id"], "status": "created"}
 
 @app.put("/tarefas/{tarefa_id}")
@@ -3589,13 +3653,15 @@ def atualizar_status_tarefa(
     payload: TarefaStatusInput,
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
+    wpp=Depends(get_whatsapp_service),
+    email_svc=Depends(get_email_service),
 ):
     if payload.status not in ("pendente", "em_andamento", "concluida", "cancelada"):
         raise HTTPException(status_code=422, detail="Status inválido.")
     loja_cond, loja_params = _loja_scope(actor)
     with db.transaction() as tx:
         row = tx.fetch_one(
-            f"SELECT id FROM tarefas WHERE id=%s {loja_cond} AND deleted_at IS NULL",
+            f"SELECT id, titulo, criado_por_usuario_id FROM tarefas WHERE id=%s {loja_cond} AND deleted_at IS NULL",
             [tarefa_id] + loja_params,
         )
         if not row:
@@ -3603,6 +3669,15 @@ def atualizar_status_tarefa(
         tx.execute(
             "UPDATE tarefas SET status=%s, updated_at=NOW() WHERE id=%s",
             (payload.status, tarefa_id),
+        )
+    if (payload.status == 'concluida'
+            and row.get('criado_por_usuario_id')
+            and row['criado_por_usuario_id'] != actor.user_id):
+        _notificar_tarefa_concluida(
+            titulo=row['titulo'],
+            criado_por_usuario_id=row['criado_por_usuario_id'],
+            concluido_por_usuario_id=actor.user_id,
+            db=db, wpp=wpp, email_svc=email_svc,
         )
     return {"status": "updated"}
 

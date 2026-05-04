@@ -121,6 +121,7 @@ class RegistrationService:
                 select i.id, i.nome, i.telefone, i.cim, i.potencia,
                        i.data_nascimento, i.nome_esposa, i.data_nascimento_esposa,
                        i.status, i.grau, i.data_elevacao, i.created_at, i.cargo_loja,
+                       i.usuario_id, i.whatsapp,
                        rm.categoria as mensalidade_categoria,
                        rm.valor     as mensalidade_valor
                 from irmaos i

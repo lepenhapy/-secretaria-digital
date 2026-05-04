@@ -173,7 +173,7 @@ class CoreTransactionServices:
         vigencia_fim,
         actor: Actor,
     ) -> int:
-        self._ensure_action_allowed(actor, {"admin_principal", "veneravel_mestre", "secretario"})
+        self._ensure_action_allowed(actor, {"admin_principal", "veneravel_mestre", "secretario", "primeiro_vigilante"})
         self._ensure_current_actor_can_target_loja(actor, loja_id)
 
         with self.db.transaction() as tx:
