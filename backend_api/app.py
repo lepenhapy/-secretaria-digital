@@ -612,6 +612,69 @@ def _ensure_schema(db) -> None:
         "ALTER TABLE boletos_processados ADD COLUMN IF NOT EXISTS notificado_em TIMESTAMPTZ",
         "ALTER TABLE boletos_processados ADD COLUMN IF NOT EXISTS notificado_canal VARCHAR(20)",
         "ALTER TABLE boletos_processados ADD COLUMN IF NOT EXISTS conteudo BYTEA",
+        # ── 038: tesouraria ────────────────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS contas_bancarias (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            nome VARCHAR(100) NOT NULL,
+            banco VARCHAR(100),
+            saldo_inicial NUMERIC(12,2) NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ)""",
+        """CREATE TABLE IF NOT EXISTS lancamentos_financeiros (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            conta_id INT REFERENCES contas_bancarias(id),
+            tipo VARCHAR(10) NOT NULL CHECK (tipo IN ('entrada','saida')),
+            categoria VARCHAR(80) NOT NULL DEFAULT 'Outros',
+            descricao TEXT,
+            valor NUMERIC(12,2) NOT NULL,
+            data_lancamento DATE NOT NULL DEFAULT CURRENT_DATE,
+            conciliado BOOLEAN NOT NULL DEFAULT FALSE,
+            criado_por INT REFERENCES usuarios(id),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ)""",
+        """CREATE TABLE IF NOT EXISTS contas_financeiras (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            tipo VARCHAR(10) NOT NULL CHECK (tipo IN ('pagar','receber')),
+            descricao VARCHAR(200) NOT NULL,
+            beneficiario VARCHAR(150),
+            valor NUMERIC(12,2) NOT NULL,
+            vencimento DATE NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'em_aberto'
+                CHECK (status IN ('em_aberto','pago','atrasado','cancelado')),
+            data_pagamento DATE,
+            observacao TEXT,
+            criado_por INT REFERENCES usuarios(id),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ)""",
+        """CREATE TABLE IF NOT EXISTS investimentos_dividas (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            tipo VARCHAR(15) NOT NULL CHECK (tipo IN ('investimento','divida')),
+            nome VARCHAR(150) NOT NULL,
+            valor_principal NUMERIC(12,2) NOT NULL,
+            taxa_juros NUMERIC(8,4),
+            data_inicio DATE NOT NULL,
+            data_vencimento DATE,
+            saldo_atual NUMERIC(12,2),
+            observacoes TEXT,
+            criado_por INT REFERENCES usuarios(id),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ)""",
+        """CREATE TABLE IF NOT EXISTS orcamento_categorias (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            categoria VARCHAR(80) NOT NULL,
+            mes_ano VARCHAR(7) NOT NULL,
+            valor_orcado NUMERIC(12,2) NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (loja_id, categoria, mes_ano))""",
+        "CREATE INDEX IF NOT EXISTS idx_lancamentos_loja ON lancamentos_financeiros(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_lancamentos_data ON lancamentos_financeiros(data_lancamento)",
+        "CREATE INDEX IF NOT EXISTS idx_contas_fin_loja ON contas_financeiras(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_contas_fin_venc ON contas_financeiras(vencimento)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -4033,5 +4096,357 @@ def marcar_todas_lidas(
         tx.execute(
             "UPDATE notificacoes_inbox SET lido=TRUE WHERE loja_id=%s AND usuario_id=%s",
             (loja_id, actor.user_id),
+        )
+    return {"status": "ok"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  TESOURARIA
+# ═══════════════════════════════════════════════════════════
+
+class ContaBancariaInput(BaseModel):
+    nome: str
+    banco: Optional[str] = None
+    saldo_inicial: Decimal = Decimal("0")
+
+class LancamentoInput(BaseModel):
+    conta_id: Optional[int] = None
+    tipo: str
+    categoria: str = "Outros"
+    descricao: Optional[str] = None
+    valor: Decimal
+    data_lancamento: Optional[str] = None
+
+class ContaFinanceiraInput(BaseModel):
+    tipo: str
+    descricao: str
+    beneficiario: Optional[str] = None
+    valor: Decimal
+    vencimento: str
+    observacao: Optional[str] = None
+
+class InvestimentoInput(BaseModel):
+    tipo: str
+    nome: str
+    valor_principal: Decimal
+    taxa_juros: Optional[Decimal] = None
+    data_inicio: str
+    data_vencimento: Optional[str] = None
+    saldo_atual: Optional[Decimal] = None
+    observacoes: Optional[str] = None
+
+class OrcamentoInput(BaseModel):
+    categoria: str
+    mes_ano: str
+    valor_orcado: Decimal
+
+
+def _tes_loja(actor: Actor) -> int:
+    if not actor.loja_id:
+        raise HTTPException(422, "Usuário sem loja vinculada")
+    return actor.loja_id
+
+
+# ── Contas Bancárias ──────────────────────────────────────────────────────────
+
+@app.get("/financeiro/contas-bancarias")
+def listar_contas_bancarias(actor=Depends(get_current_actor), db=Depends(get_database)):
+    loja_id = _tes_loja(actor)
+    with db.transaction() as tx:
+        rows = tx.fetch_all(
+            "SELECT * FROM contas_bancarias WHERE loja_id=%s AND deleted_at IS NULL ORDER BY nome",
+            [loja_id],
+        )
+    return [dict(r) for r in rows]
+
+
+@app.post("/financeiro/contas-bancarias", status_code=201)
+def criar_conta_bancaria(payload: ContaBancariaInput, actor=Depends(get_current_actor), db=Depends(get_database)):
+    loja_id = _tes_loja(actor)
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            "INSERT INTO contas_bancarias (loja_id, nome, banco, saldo_inicial) VALUES (%s,%s,%s,%s) RETURNING id",
+            [loja_id, payload.nome, payload.banco, payload.saldo_inicial],
+        )
+    return {"id": row["id"]}
+
+
+@app.delete("/financeiro/contas-bancarias/{conta_id}", status_code=204)
+def excluir_conta_bancaria(conta_id: int, actor=Depends(get_current_actor), db=Depends(get_database)):
+    with db.transaction() as tx:
+        tx.execute("UPDATE contas_bancarias SET deleted_at=NOW() WHERE id=%s AND loja_id=%s",
+                   [conta_id, actor.loja_id])
+
+
+# ── Lançamentos (Fluxo de Caixa) ─────────────────────────────────────────────
+
+@app.get("/financeiro/lancamentos")
+def listar_lancamentos(
+    mes: Optional[str] = Query(None),
+    conta_id: Optional[int] = Query(None),
+    tipo: Optional[str] = Query(None),
+    actor=Depends(get_current_actor), db=Depends(get_database),
+):
+    loja_id = _tes_loja(actor)
+    filtros = ["l.loja_id = %s", "l.deleted_at IS NULL"]
+    params: list = [loja_id]
+    if mes:
+        filtros.append("to_char(l.data_lancamento,'YYYY-MM') = %s"); params.append(mes)
+    if conta_id:
+        filtros.append("l.conta_id = %s"); params.append(conta_id)
+    if tipo:
+        filtros.append("l.tipo = %s"); params.append(tipo)
+    where = " AND ".join(filtros)
+    with db.transaction() as tx:
+        rows = tx.fetch_all(
+            f"""SELECT l.*, cb.nome AS conta_nome
+                FROM lancamentos_financeiros l
+                LEFT JOIN contas_bancarias cb ON cb.id = l.conta_id
+                WHERE {where} ORDER BY l.data_lancamento DESC, l.created_at DESC""",
+            params,
+        )
+    return [dict(r) for r in rows]
+
+
+@app.get("/financeiro/fluxo-resumo")
+def fluxo_resumo(
+    mes: Optional[str] = Query(None),
+    conta_id: Optional[int] = Query(None),
+    actor=Depends(get_current_actor), db=Depends(get_database),
+):
+    loja_id = _tes_loja(actor)
+    filtros = ["l.loja_id = %s", "l.deleted_at IS NULL"]
+    params: list = [loja_id]
+    if mes:
+        filtros.append("to_char(l.data_lancamento,'YYYY-MM') = %s"); params.append(mes)
+    if conta_id:
+        filtros.append("l.conta_id = %s"); params.append(conta_id)
+    where = " AND ".join(filtros)
+    saldo_inicial = 0.0
+    if conta_id:
+        with db.transaction() as tx:
+            cb = tx.fetch_one("SELECT saldo_inicial FROM contas_bancarias WHERE id=%s", [conta_id])
+            if cb:
+                saldo_inicial = float(cb["saldo_inicial"])
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            f"""SELECT
+                COALESCE(SUM(CASE WHEN l.tipo='entrada' THEN l.valor ELSE 0 END),0) AS entradas,
+                COALESCE(SUM(CASE WHEN l.tipo='saida'   THEN l.valor ELSE 0 END),0) AS saidas
+                FROM lancamentos_financeiros l WHERE {where}""",
+            params,
+        )
+    entradas = float(row["entradas"]) if row else 0.0
+    saidas   = float(row["saidas"])   if row else 0.0
+    return {"saldo_inicial": saldo_inicial, "entradas": entradas,
+            "saidas": saidas, "saldo": saldo_inicial + entradas - saidas}
+
+
+@app.post("/financeiro/lancamentos", status_code=201)
+def criar_lancamento(payload: LancamentoInput, actor=Depends(get_current_actor), db=Depends(get_database)):
+    loja_id = _tes_loja(actor)
+    if payload.tipo not in ("entrada", "saida"):
+        raise HTTPException(422, "tipo deve ser 'entrada' ou 'saida'")
+    from datetime import date as _date
+    data = _parse_date_field(payload.data_lancamento, "data_lancamento") or str(_date.today())
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            """INSERT INTO lancamentos_financeiros
+               (loja_id, conta_id, tipo, categoria, descricao, valor, data_lancamento, criado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            [loja_id, payload.conta_id, payload.tipo, payload.categoria,
+             payload.descricao, payload.valor, data, actor.user_id],
+        )
+    return {"id": row["id"]}
+
+
+@app.delete("/financeiro/lancamentos/{lancamento_id}", status_code=204)
+def excluir_lancamento(lancamento_id: int, actor=Depends(get_current_actor), db=Depends(get_database)):
+    with db.transaction() as tx:
+        tx.execute("UPDATE lancamentos_financeiros SET deleted_at=NOW() WHERE id=%s AND loja_id=%s",
+                   [lancamento_id, actor.loja_id])
+
+
+@app.patch("/financeiro/lancamentos/{lancamento_id}/conciliar")
+def conciliar_lancamento(lancamento_id: int, actor=Depends(get_current_actor), db=Depends(get_database)):
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE lancamentos_financeiros SET conciliado = NOT conciliado WHERE id=%s AND loja_id=%s",
+            [lancamento_id, actor.loja_id],
+        )
+        row = tx.fetch_one("SELECT conciliado FROM lancamentos_financeiros WHERE id=%s", [lancamento_id])
+    return {"conciliado": row["conciliado"] if row else False}
+
+
+# ── Contas a Pagar / Receber ──────────────────────────────────────────────────
+
+@app.get("/financeiro/contas-financeiras")
+def listar_contas_financeiras(
+    tipo: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    mes: Optional[str] = Query(None),
+    actor=Depends(get_current_actor), db=Depends(get_database),
+):
+    loja_id = _tes_loja(actor)
+    filtros = ["loja_id = %s", "deleted_at IS NULL"]
+    params: list = [loja_id]
+    if tipo:   filtros.append("tipo = %s");   params.append(tipo)
+    if status: filtros.append("status = %s"); params.append(status)
+    if mes:    filtros.append("to_char(vencimento,'YYYY-MM') = %s"); params.append(mes)
+    where = " AND ".join(filtros)
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE contas_financeiras SET status='atrasado' WHERE loja_id=%s AND status='em_aberto' AND vencimento < CURRENT_DATE",
+            [loja_id],
+        )
+        rows = tx.fetch_all(f"SELECT * FROM contas_financeiras WHERE {where} ORDER BY vencimento ASC", params)
+    return [dict(r) for r in rows]
+
+
+@app.post("/financeiro/contas-financeiras", status_code=201)
+def criar_conta_financeira(payload: ContaFinanceiraInput, actor=Depends(get_current_actor), db=Depends(get_database)):
+    loja_id = _tes_loja(actor)
+    if payload.tipo not in ("pagar", "receber"):
+        raise HTTPException(422, "tipo deve ser 'pagar' ou 'receber'")
+    venc = _parse_date_field(payload.vencimento, "vencimento")
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            """INSERT INTO contas_financeiras
+               (loja_id, tipo, descricao, beneficiario, valor, vencimento, observacao, criado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            [loja_id, payload.tipo, payload.descricao, payload.beneficiario,
+             payload.valor, venc, payload.observacao, actor.user_id],
+        )
+    return {"id": row["id"]}
+
+
+@app.patch("/financeiro/contas-financeiras/{conta_id}/pagar")
+def marcar_conta_paga(conta_id: int, actor=Depends(get_current_actor), db=Depends(get_database)):
+    with db.transaction() as tx:
+        tx.execute(
+            "UPDATE contas_financeiras SET status='pago', data_pagamento=CURRENT_DATE WHERE id=%s AND loja_id=%s",
+            [conta_id, actor.loja_id],
+        )
+    return {"status": "pago"}
+
+
+@app.patch("/financeiro/contas-financeiras/{conta_id}/cancelar")
+def cancelar_conta_financeira(conta_id: int, actor=Depends(get_current_actor), db=Depends(get_database)):
+    with db.transaction() as tx:
+        tx.execute("UPDATE contas_financeiras SET status='cancelado' WHERE id=%s AND loja_id=%s",
+                   [conta_id, actor.loja_id])
+    return {"status": "cancelado"}
+
+
+@app.delete("/financeiro/contas-financeiras/{conta_id}", status_code=204)
+def excluir_conta_financeira(conta_id: int, actor=Depends(get_current_actor), db=Depends(get_database)):
+    with db.transaction() as tx:
+        tx.execute("UPDATE contas_financeiras SET deleted_at=NOW() WHERE id=%s AND loja_id=%s",
+                   [conta_id, actor.loja_id])
+
+
+# ── Investimentos e Dívidas ───────────────────────────────────────────────────
+
+@app.get("/financeiro/investimentos")
+def listar_investimentos(actor=Depends(get_current_actor), db=Depends(get_database)):
+    loja_id = _tes_loja(actor)
+    with db.transaction() as tx:
+        rows = tx.fetch_all(
+            "SELECT * FROM investimentos_dividas WHERE loja_id=%s AND deleted_at IS NULL ORDER BY tipo, nome",
+            [loja_id],
+        )
+    return [dict(r) for r in rows]
+
+
+@app.post("/financeiro/investimentos", status_code=201)
+def criar_investimento(payload: InvestimentoInput, actor=Depends(get_current_actor), db=Depends(get_database)):
+    loja_id = _tes_loja(actor)
+    if payload.tipo not in ("investimento", "divida"):
+        raise HTTPException(422, "tipo deve ser 'investimento' ou 'divida'")
+    d_ini  = _parse_date_field(payload.data_inicio, "data_inicio")
+    d_venc = _parse_date_field(payload.data_vencimento, "data_vencimento") if payload.data_vencimento else None
+    with db.transaction() as tx:
+        row = tx.fetch_one(
+            """INSERT INTO investimentos_dividas
+               (loja_id, tipo, nome, valor_principal, taxa_juros, data_inicio,
+                data_vencimento, saldo_atual, observacoes, criado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            [loja_id, payload.tipo, payload.nome, payload.valor_principal,
+             payload.taxa_juros, d_ini, d_venc, payload.saldo_atual,
+             payload.observacoes, actor.user_id],
+        )
+    return {"id": row["id"]}
+
+
+@app.put("/financeiro/investimentos/{inv_id}")
+def atualizar_investimento(inv_id: int, payload: InvestimentoInput,
+                           actor=Depends(get_current_actor), db=Depends(get_database)):
+    d_ini  = _parse_date_field(payload.data_inicio, "data_inicio")
+    d_venc = _parse_date_field(payload.data_vencimento, "data_vencimento") if payload.data_vencimento else None
+    with db.transaction() as tx:
+        tx.execute(
+            """UPDATE investimentos_dividas
+               SET tipo=%s, nome=%s, valor_principal=%s, taxa_juros=%s,
+                   data_inicio=%s, data_vencimento=%s, saldo_atual=%s, observacoes=%s
+               WHERE id=%s AND loja_id=%s""",
+            [payload.tipo, payload.nome, payload.valor_principal, payload.taxa_juros,
+             d_ini, d_venc, payload.saldo_atual, payload.observacoes, inv_id, actor.loja_id],
+        )
+    return {"status": "updated"}
+
+
+@app.delete("/financeiro/investimentos/{inv_id}", status_code=204)
+def excluir_investimento(inv_id: int, actor=Depends(get_current_actor), db=Depends(get_database)):
+    with db.transaction() as tx:
+        tx.execute("UPDATE investimentos_dividas SET deleted_at=NOW() WHERE id=%s AND loja_id=%s",
+                   [inv_id, actor.loja_id])
+
+
+# ── Orçamento x Realizado ────────────────────────────────────────────────────
+
+@app.get("/financeiro/orcamento")
+def listar_orcamento(mes: str = Query(...), actor=Depends(get_current_actor), db=Depends(get_database)):
+    loja_id = _tes_loja(actor)
+    with db.transaction() as tx:
+        orcado   = tx.fetch_all(
+            "SELECT categoria, valor_orcado FROM orcamento_categorias WHERE loja_id=%s AND mes_ano=%s",
+            [loja_id, mes],
+        )
+        realizado = tx.fetch_all(
+            """SELECT categoria, tipo, SUM(valor) AS total
+               FROM lancamentos_financeiros
+               WHERE loja_id=%s AND to_char(data_lancamento,'YYYY-MM')=%s AND deleted_at IS NULL
+               GROUP BY categoria, tipo""",
+            [loja_id, mes],
+        )
+    orcado_map = {r["categoria"]: float(r["valor_orcado"]) for r in orcado}
+    real_map: dict = {}
+    for r in realizado:
+        cat = r["categoria"]
+        if cat not in real_map:
+            real_map[cat] = {"entrada": 0.0, "saida": 0.0}
+        real_map[cat][r["tipo"]] = float(r["total"])
+    categorias = sorted(set(orcado_map) | set(real_map))
+    return [
+        {
+            "categoria": cat,
+            "valor_orcado": orcado_map.get(cat, 0.0),
+            "realizado_entrada": real_map.get(cat, {}).get("entrada", 0.0),
+            "realizado_saida":   real_map.get(cat, {}).get("saida",   0.0),
+        }
+        for cat in categorias
+    ]
+
+
+@app.post("/financeiro/orcamento", status_code=201)
+def salvar_orcamento(payload: OrcamentoInput, actor=Depends(get_current_actor), db=Depends(get_database)):
+    loja_id = _tes_loja(actor)
+    with db.transaction() as tx:
+        tx.execute(
+            """INSERT INTO orcamento_categorias (loja_id, categoria, mes_ano, valor_orcado)
+               VALUES (%s,%s,%s,%s)
+               ON CONFLICT (loja_id, categoria, mes_ano)
+               DO UPDATE SET valor_orcado = EXCLUDED.valor_orcado""",
+            [loja_id, payload.categoria, payload.mes_ano, payload.valor_orcado],
         )
     return {"status": "ok"}

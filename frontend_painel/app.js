@@ -82,7 +82,7 @@ const CARGOS = [
       { icone: '📊', titulo: 'Controle de caixa',     desc: 'Acompanha entradas e saídas financeiras da loja.' },
       { icone: '📁', titulo: 'Documentação fiscal',   desc: 'Envia comprovantes e documentos financeiros.' },
     ],
-    funcionalidades: ['criar_mensagem','criar_caso','criar_reembolso','aprovar_reembolso',
+    funcionalidades: ['tesouraria','criar_mensagem','criar_caso','criar_reembolso','aprovar_reembolso',
                       'pagar_reembolso','upload_arquivo','gerar_cobranca'],
   },
   {
@@ -506,7 +506,7 @@ function mostrarView(id) {
    'relatoriosView','permissoesView','comissoesView','repositorioView',
    'agendaView','irmaoDetalheView','usuariosView','inventarioView','whatsappView',
    'contratosView','tarefasView','lojasView','complexoView','tenantsView',
-   'auditView'].forEach(v => {
+   'auditView','tesourariaView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -612,6 +612,10 @@ function renderSidebar() {
       <span style="font-size:15px">💬</span><span>WhatsApp</span>
       <span id="wppStatusDot" style="width:8px;height:8px;border-radius:50%;background:#94a3b8;display:inline-block;margin-left:auto"></span>
     </div>` : ''}
+    ${['admin_principal','veneravel_mestre','financeiro'].includes(state.usuario?.cargo) ? `
+    <div class="sidebar-nav-module" id="nav-tesouraria" onclick="abrirModulo('tesouraria')">
+      <span style="font-size:15px">💼</span><span>Tesouraria</span>
+    </div>` : ''}
     ${state.usuario?.cargo === 'admin_principal' ? `
     <div class="sidebar-nav-module" id="nav-auditoria" onclick="abrirModulo('auditoria')">
       <span style="font-size:15px">📋</span><span>Trilha de Auditoria</span>
@@ -658,6 +662,7 @@ function abrirModulo(id) {
     whatsapp:       () => { mostrarView('whatsappView');   renderWhatsAppView(); },
     ver_contratos:  () => { mostrarView('contratosView');  renderContratosView(); },
     tarefas:        () => { mostrarView('tarefasView');    renderTarefasView(); },
+    tesouraria:     () => { mostrarView('tesourariaView'); renderTesourariaView(); },
     lojas:          () => { mostrarView('lojasView');      renderLojasView(); },
     complexo_dash:  () => { mostrarView('complexoView');   renderComplexoDashView(); },
     tenants:        () => { mostrarView('tenantsView');    renderTenantsView(); },
@@ -5428,6 +5433,616 @@ function exportarAuditTxt() {
 function imprimirAuditoria() {
   if (!_auditData.length) { alert('Carregue os dados antes de gerar PDF.'); return; }
   window.print();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TESOURARIA
+// ═══════════════════════════════════════════════════════════
+
+let _tesAba = 'fluxo';
+let _tesMes = new Date().toISOString().substring(0, 7);
+let _tesContaId = '';
+let _tesBancarias = [];
+let _tesFiltroTipo = '', _tesFiltroStatusCF = '';
+let _tesEditInvId = null;
+
+function _tesFmt(v) {
+  return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function _tesBadge(status) {
+  const cfg = {
+    em_aberto: ['🟡', '#ca8a04', '#fefce8'],
+    pago:      ['✅', '#16a34a', '#dcfce7'],
+    atrasado:  ['🔴', '#dc2626', '#fee2e2'],
+    cancelado: ['⛔', '#94a3b8', '#f1f5f9'],
+  };
+  const [ic, cor, bg] = cfg[status] || ['—', '#64748b', '#f8fafc'];
+  return `<span style="background:${bg};color:${cor};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${ic} ${status.replace('_',' ')}</span>`;
+}
+
+async function renderTesourariaView() {
+  const view = document.getElementById('tesourariaView');
+  if (!view) return;
+  try { _tesBancarias = await api('GET', '/financeiro/contas-bancarias'); } catch(_) { _tesBancarias = []; }
+
+  const abas = [
+    ['fluxo',         '💰 Fluxo de Caixa'],
+    ['conciliacao',   '🏦 Conciliação'],
+    ['contas',        '📋 Contas'],
+    ['investimentos', '📈 Investimentos'],
+    ['orcamento',     '📊 Orçamento'],
+  ];
+
+  view.innerHTML = `
+    <div style="padding:24px;max-width:1100px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+        <h1 style="font-size:22px;font-weight:700;margin:0">💼 Tesouraria</h1>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="month" value="${_tesMes}" onchange="_tesMes=this.value;_tesCarregarAba()"
+            style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px" />
+          <select onchange="_tesContaId=this.value;_tesCarregarAba()"
+            style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+            <option value="">Todas as contas</option>
+            ${_tesBancarias.map(c=>`<option value="${c.id}" ${_tesContaId==c.id?'selected':''}>${c.nome}</option>`).join('')}
+          </select>
+          <button onclick="_tesModalNovaConta()" class="func-btn neutral" style="font-size:12px">+ Conta</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px;border-bottom:2px solid #e2e8f0;padding-bottom:12px">
+        ${abas.map(([id,label])=>`
+          <button onclick="_tesMudarAba('${id}')"
+            style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;
+                   background:${_tesAba===id?'#2563eb':'#f1f5f9'};color:${_tesAba===id?'#fff':'#475569'};transition:background 0.2s">
+            ${label}
+          </button>`).join('')}
+      </div>
+      <div id="tes-conteudo"></div>
+    </div>`;
+  await _tesCarregarAba();
+}
+
+function _tesMudarAba(aba) { _tesAba = aba; _tesCarregarAba(); }
+
+async function _tesCarregarAba() {
+  const el = document.getElementById('tes-conteudo');
+  if (!el) return;
+  el.innerHTML = '<div style="color:#64748b;padding:16px">Carregando…</div>';
+  try {
+    if (_tesAba === 'fluxo')         await _tesFluxo(el);
+    else if (_tesAba === 'conciliacao')   await _tesConciliacao(el);
+    else if (_tesAba === 'contas')        await _tesContasFinanceiras(el);
+    else if (_tesAba === 'investimentos') await _tesInvestimentos(el);
+    else if (_tesAba === 'orcamento')     await _tesOrcamento(el);
+  } catch(e) { el.innerHTML = `<p style="color:#dc2626">Erro: ${e.message}</p>`; }
+}
+
+// ── Conta Bancária ────────────────────────────────────────────────────────────
+
+function _tesModalNovaConta() {
+  abrirModal('Nova Conta Bancária', `
+    <div><div class="modal-label">Nome da conta *</div>
+      <input class="modal-input" id="tbc_nome" placeholder="Ex: Caixa Bradesco" /></div>
+    <div><div class="modal-label">Banco</div>
+      <input class="modal-input" id="tbc_banco" placeholder="Ex: Bradesco" /></div>
+    <div><div class="modal-label">Saldo Inicial (R$)</div>
+      <input class="modal-input" id="tbc_saldo" type="number" step="0.01" value="0" /></div>
+    <pre class="modal-result" id="tbc_msg" style="display:none"></pre>`,
+  [{cls:'neutral',action:'fecharModal()',label:'Cancelar'},
+   {cls:'primary',action:'_tesSalvarConta()',label:'Salvar'}]);
+}
+
+async function _tesSalvarConta() {
+  const msg = document.getElementById('tbc_msg');
+  const nome = document.getElementById('tbc_nome').value.trim();
+  if (!nome) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Nome obrigatório'; return; }
+  try {
+    await api('POST', '/financeiro/contas-bancarias', {
+      nome, banco: document.getElementById('tbc_banco').value.trim()||null,
+      saldo_inicial: parseFloat(document.getElementById('tbc_saldo').value)||0,
+    });
+    fecharModal(); renderTesourariaView();
+  } catch(e) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message; }
+}
+
+// ── 1. Fluxo de Caixa ────────────────────────────────────────────────────────
+
+async function _tesFluxo(el) {
+  const qs = new URLSearchParams({ mes: _tesMes });
+  if (_tesContaId) qs.set('conta_id', _tesContaId);
+  const [lista, resumo] = await Promise.all([
+    api('GET', '/financeiro/lancamentos?' + qs),
+    api('GET', '/financeiro/fluxo-resumo?' + qs),
+  ]);
+  const card = (l, v, c) =>
+    `<div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:16px 20px;flex:1;min-width:130px">
+       <div style="font-size:11px;color:#64748b;font-weight:600;margin-bottom:4px">${l}</div>
+       <div style="font-size:20px;font-weight:700;color:${c}">${_tesFmt(v)}</div>
+     </div>`;
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+      ${card('Saldo Inicial', resumo.saldo_inicial, '#475569')}
+      ${card('Entradas', resumo.entradas, '#16a34a')}
+      ${card('Saídas', resumo.saidas, '#dc2626')}
+      ${card('Saldo Final', resumo.saldo, resumo.saldo >= 0 ? '#16a34a' : '#dc2626')}
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <span style="font-size:15px;font-weight:700">Lançamentos · ${_tesMes}</span>
+      <button onclick="_tesModalLancamento()" class="func-btn primary">+ Novo Lançamento</button>
+    </div>
+    ${!lista.length ? `<p style="color:#94a3b8;text-align:center;padding:32px">Nenhum lançamento este mês.</p>` : `
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+        ${['Data','Tipo','Categoria','Descrição','Conta','Valor',''].map(h=>
+          `<th style="padding:8px 10px;text-align:${h==='Valor'?'right':'left'};font-weight:600;color:#64748b">${h}</th>`).join('')}
+      </tr></thead>
+      <tbody>${lista.map(l=>`
+        <tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:8px 10px;color:#64748b">${l.data_lancamento?.substring?.(0,10)||'—'}</td>
+          <td style="padding:8px 10px">
+            <span style="background:${l.tipo==='entrada'?'#dcfce7':'#fee2e2'};color:${l.tipo==='entrada'?'#16a34a':'#dc2626'};
+                   padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600">
+              ${l.tipo==='entrada'?'▲ Entrada':'▼ Saída'}
+            </span>
+          </td>
+          <td style="padding:8px 10px">${l.categoria}</td>
+          <td style="padding:8px 10px;color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.descricao||'—'}</td>
+          <td style="padding:8px 10px;color:#64748b">${l.conta_nome||'—'}</td>
+          <td style="padding:8px 10px;text-align:right;font-weight:700;color:${l.tipo==='entrada'?'#16a34a':'#dc2626'}">${_tesFmt(l.valor)}</td>
+          <td style="padding:8px 10px">
+            <button onclick="_tesExcluirLanc(${l.id})"
+              style="background:#fef2f2;border:none;color:#dc2626;padding:3px 8px;border-radius:6px;cursor:pointer">🗑</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`}`;
+}
+
+function _tesModalLancamento() {
+  const hoje = new Date().toISOString().substring(0, 10);
+  const contaOpts = _tesBancarias.map(c=>`<option value="${c.id}">${c.nome}</option>`).join('');
+  abrirModal('Novo Lançamento', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div class="modal-label">Tipo *</div>
+        <select class="modal-input" id="tl_tipo">
+          <option value="entrada">▲ Entrada</option>
+          <option value="saida">▼ Saída</option>
+        </select></div>
+      <div><div class="modal-label">Data *</div>
+        <input class="modal-input" id="tl_data" type="date" value="${hoje}" /></div>
+    </div>
+    <div><div class="modal-label">Categoria *</div>
+      <input class="modal-input" id="tl_cat" placeholder="Ex: Mensalidades, Ágape, Manutenção…" /></div>
+    <div><div class="modal-label">Descrição</div>
+      <input class="modal-input" id="tl_desc" placeholder="Descrição opcional" /></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div class="modal-label">Valor (R$) *</div>
+        <input class="modal-input" id="tl_valor" type="number" step="0.01" placeholder="0,00" /></div>
+      <div><div class="modal-label">Conta Bancária</div>
+        <select class="modal-input" id="tl_conta">
+          <option value="">— Sem conta —</option>${contaOpts}
+        </select></div>
+    </div>
+    <pre class="modal-result" id="tl_msg" style="display:none"></pre>`,
+  [{cls:'neutral',action:'fecharModal()',label:'Cancelar'},
+   {cls:'primary',action:'_tesSalvarLanc()',label:'Salvar'}]);
+}
+
+async function _tesSalvarLanc() {
+  const msg = document.getElementById('tl_msg');
+  const cat = document.getElementById('tl_cat').value.trim();
+  const valor = parseFloat(document.getElementById('tl_valor').value);
+  if (!cat || !valor || valor <= 0) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Categoria e valor são obrigatórios.'; return;
+  }
+  const contaVal = document.getElementById('tl_conta').value;
+  try {
+    await api('POST', '/financeiro/lancamentos', {
+      tipo: document.getElementById('tl_tipo').value,
+      data_lancamento: document.getElementById('tl_data').value,
+      categoria: cat, descricao: document.getElementById('tl_desc').value.trim()||null,
+      valor, conta_id: contaVal ? +contaVal : null,
+    });
+    fecharModal(); _tesCarregarAba();
+  } catch(e) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message; }
+}
+
+async function _tesExcluirLanc(id) {
+  if (!confirm('Excluir este lançamento?')) return;
+  await api('DELETE', `/financeiro/lancamentos/${id}`);
+  _tesCarregarAba();
+}
+
+// ── 2. Conciliação Bancária ───────────────────────────────────────────────────
+
+async function _tesConciliacao(el) {
+  const qs = new URLSearchParams({ mes: _tesMes });
+  if (_tesContaId) qs.set('conta_id', _tesContaId);
+  const lista = await api('GET', '/financeiro/lancamentos?' + qs);
+  const conciliados = lista.filter(l => l.conciliado);
+  const totalConc = conciliados.reduce((s,l) => s + (l.tipo==='entrada'?+l.valor:-l.valor), 0);
+  const saldoInicial = parseFloat(_tesBancarias.find(c=>c.id==_tesContaId)?.saldo_inicial || 0);
+  const saldoConc = saldoInicial + totalConc;
+
+  el.innerHTML = `
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:20px;display:flex;gap:24px;flex-wrap:wrap;align-items:center">
+      <div>
+        <div style="font-size:11px;color:#64748b;font-weight:600">Saldo Inicial</div>
+        <div style="font-size:18px;font-weight:700">${_tesFmt(saldoInicial)}</div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:#64748b;font-weight:600">Saldo Conciliado</div>
+        <div style="font-size:18px;font-weight:700;color:#2563eb">${_tesFmt(saldoConc)}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:13px;font-weight:600;color:#64748b">Saldo Extrato (R$)</span>
+        <input id="tes_extrato" type="number" step="0.01" value="${saldoConc.toFixed(2)}"
+          style="padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;width:130px"
+          oninput="_tesCalcDif(${saldoConc})" />
+        <span id="tes_dif" style="font-size:15px;font-weight:700;color:#16a34a">✓ OK</span>
+      </div>
+    </div>
+    <p style="font-size:13px;color:#64748b;margin-bottom:12px">
+      Marque ✔ os lançamentos que já aparecem no extrato bancário real.
+    </p>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+        <th style="padding:8px 10px;width:40px">✔</th>
+        ${['Data','Categoria','Descrição','Valor'].map(h=>
+          `<th style="padding:8px 10px;text-align:${h==='Valor'?'right':'left'};color:#64748b">${h}</th>`).join('')}
+      </tr></thead>
+      <tbody>${lista.map(l=>`
+        <tr style="border-bottom:1px solid #f1f5f9;${l.conciliado?'background:#f0fdf4':''}">
+          <td style="padding:8px 10px;text-align:center">
+            <input type="checkbox" ${l.conciliado?'checked':''} style="width:16px;height:16px;cursor:pointer"
+              onchange="_tesConciliar(${l.id},this)" />
+          </td>
+          <td style="padding:8px 10px;color:#64748b">${l.data_lancamento?.substring?.(0,10)||'—'}</td>
+          <td style="padding:8px 10px">${l.categoria}</td>
+          <td style="padding:8px 10px;color:#64748b">${l.descricao||'—'}</td>
+          <td style="padding:8px 10px;text-align:right;font-weight:700;color:${l.tipo==='entrada'?'#16a34a':'#dc2626'}">
+            ${l.tipo==='entrada'?'+':'-'}${_tesFmt(l.valor)}
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+function _tesCalcDif(saldoConc) {
+  const ext = parseFloat(document.getElementById('tes_extrato').value) || 0;
+  const dif = ext - saldoConc;
+  const span = document.getElementById('tes_dif');
+  if (Math.abs(dif) < 0.01) { span.textContent = '✓ OK'; span.style.color = '#16a34a'; }
+  else { span.textContent = `Δ ${_tesFmt(Math.abs(dif))} ${dif > 0 ? '↑' : '↓'}`; span.style.color = '#dc2626'; }
+}
+
+async function _tesConciliar(id, cb) {
+  try {
+    await api('PATCH', `/financeiro/lancamentos/${id}/conciliar`);
+    const tr = cb.closest('tr');
+    if (tr) tr.style.background = cb.checked ? '#f0fdf4' : '';
+  } catch(e) { cb.checked = !cb.checked; alert('Erro: ' + e.message); }
+}
+
+// ── 3. Contas a Pagar / Receber ───────────────────────────────────────────────
+
+async function _tesContasFinanceiras(el) {
+  const qs = new URLSearchParams({ mes: _tesMes });
+  if (_tesFiltroTipo)       qs.set('tipo', _tesFiltroTipo);
+  if (_tesFiltroStatusCF)   qs.set('status', _tesFiltroStatusCF);
+  const lista = await api('GET', '/financeiro/contas-financeiras?' + qs);
+  const totalPagar    = lista.filter(c=>c.tipo==='pagar'  &&c.status!=='cancelado').reduce((s,c)=>s+Number(c.valor),0);
+  const totalReceber  = lista.filter(c=>c.tipo==='receber'&&c.status!=='cancelado').reduce((s,c)=>s+Number(c.valor),0);
+  const totalAtrasado = lista.filter(c=>c.status==='atrasado').reduce((s,c)=>s+Number(c.valor),0);
+
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+      ${[['A Pagar', totalPagar,'#dc2626'],['A Receber', totalReceber,'#16a34a'],['Em Atraso', totalAtrasado,'#ea580c']].map(([l,v,c])=>`
+        <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:14px 18px;flex:1;min-width:130px">
+          <div style="font-size:11px;color:#64748b;font-weight:600">${l}</div>
+          <div style="font-size:18px;font-weight:700;color:${c}">${_tesFmt(v)}</div>
+        </div>`).join('')}
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select onchange="_tesFiltroTipo=this.value;_tesCarregarAba()"
+          style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+          <option value="" ${!_tesFiltroTipo?'selected':''}>Todos</option>
+          <option value="pagar"   ${_tesFiltroTipo==='pagar'?'selected':''}>A Pagar</option>
+          <option value="receber" ${_tesFiltroTipo==='receber'?'selected':''}>A Receber</option>
+        </select>
+        <select onchange="_tesFiltroStatusCF=this.value;_tesCarregarAba()"
+          style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+          <option value="" ${!_tesFiltroStatusCF?'selected':''}>Todos os status</option>
+          <option value="em_aberto" ${_tesFiltroStatusCF==='em_aberto'?'selected':''}>Em aberto</option>
+          <option value="atrasado"  ${_tesFiltroStatusCF==='atrasado'?'selected':''}>Atrasado</option>
+          <option value="pago"      ${_tesFiltroStatusCF==='pago'?'selected':''}>Pago</option>
+        </select>
+      </div>
+      <button onclick="_tesModalNovaContaFin()" class="func-btn primary">+ Nova Conta</button>
+    </div>
+    ${!lista.length ? `<p style="color:#94a3b8;text-align:center;padding:32px">Nenhum lançamento encontrado.</p>` : `
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${lista.map(c=>`
+        <div style="background:#fff;border:1px solid ${c.status==='atrasado'?'#fca5a5':'#e2e8f0'};
+                    border-left:4px solid ${c.tipo==='pagar'?'#dc2626':'#16a34a'};
+                    border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:14px">${c.descricao}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:2px">
+              ${c.beneficiario?c.beneficiario+' · ':''}Vence: ${c.vencimento?.substring?.(0,10)||'—'}
+              ${c.data_pagamento?' · Pago: '+c.data_pagamento.substring(0,10):''}
+              ${c.observacao?' · '+c.observacao:''}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap">
+            <span style="font-weight:700;font-size:16px;color:${c.tipo==='pagar'?'#dc2626':'#16a34a'}">${_tesFmt(c.valor)}</span>
+            ${_tesBadge(c.status)}
+            ${c.status!=='pago'&&c.status!=='cancelado'?`
+              <button onclick="_tesMarcarPago(${c.id})" class="btn-sm success">✓ Pagar</button>
+              <button onclick="_tesCancelarContaFin(${c.id})" class="btn-sm neutral">⊘</button>`:''}
+            <button onclick="_tesExcluirContaFin(${c.id})" class="btn-sm danger">🗑</button>
+          </div>
+        </div>`).join('')}
+    </div>`}`;
+}
+
+function _tesModalNovaContaFin() {
+  abrirModal('Nova Conta', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div class="modal-label">Tipo *</div>
+        <select class="modal-input" id="tcf_tipo">
+          <option value="pagar">A Pagar</option>
+          <option value="receber">A Receber</option>
+        </select></div>
+      <div><div class="modal-label">Valor (R$) *</div>
+        <input class="modal-input" id="tcf_valor" type="number" step="0.01" /></div>
+    </div>
+    <div><div class="modal-label">Descrição *</div>
+      <input class="modal-input" id="tcf_desc" placeholder="Ex: Aluguel do templo" /></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div class="modal-label">Beneficiário</div>
+        <input class="modal-input" id="tcf_benef" placeholder="Fornecedor ou devedor" /></div>
+      <div><div class="modal-label">Vencimento *</div>
+        <input class="modal-input" id="tcf_venc" type="date" value="${new Date().toISOString().substring(0,10)}" /></div>
+    </div>
+    <div><div class="modal-label">Observação</div>
+      <input class="modal-input" id="tcf_obs" /></div>
+    <pre class="modal-result" id="tcf_msg" style="display:none"></pre>`,
+  [{cls:'neutral',action:'fecharModal()',label:'Cancelar'},
+   {cls:'primary',action:'_tesSalvarContaFin()',label:'Salvar'}]);
+}
+
+async function _tesSalvarContaFin() {
+  const msg = document.getElementById('tcf_msg');
+  const desc = document.getElementById('tcf_desc').value.trim();
+  const valor = parseFloat(document.getElementById('tcf_valor').value);
+  if (!desc || !valor || valor <= 0) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Descrição e valor são obrigatórios.'; return;
+  }
+  try {
+    await api('POST', '/financeiro/contas-financeiras', {
+      tipo: document.getElementById('tcf_tipo').value, descricao: desc,
+      beneficiario: document.getElementById('tcf_benef').value.trim()||null, valor,
+      vencimento: document.getElementById('tcf_venc').value,
+      observacao: document.getElementById('tcf_obs').value.trim()||null,
+    });
+    fecharModal(); _tesCarregarAba();
+  } catch(e) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message; }
+}
+
+async function _tesMarcarPago(id) {
+  await api('PATCH', `/financeiro/contas-financeiras/${id}/pagar`); _tesCarregarAba();
+}
+
+async function _tesCancelarContaFin(id) {
+  if (!confirm('Cancelar esta conta?')) return;
+  await api('PATCH', `/financeiro/contas-financeiras/${id}/cancelar`); _tesCarregarAba();
+}
+
+async function _tesExcluirContaFin(id) {
+  if (!confirm('Excluir permanentemente?')) return;
+  await api('DELETE', `/financeiro/contas-financeiras/${id}`); _tesCarregarAba();
+}
+
+// ── 4. Investimentos e Dívidas ────────────────────────────────────────────────
+
+async function _tesInvestimentos(el) {
+  const lista = await api('GET', '/financeiro/investimentos');
+  const inv = lista.filter(i=>i.tipo==='investimento');
+  const div = lista.filter(i=>i.tipo==='divida');
+  const totalInv = inv.reduce((s,i)=>s+Number(i.saldo_atual??i.valor_principal),0);
+  const totalDiv = div.reduce((s,i)=>s+Number(i.saldo_atual??i.valor_principal),0);
+
+  const renderItem = i => `
+    <div style="background:#fff;border:1px solid #e2e8f0;border-left:4px solid ${i.tipo==='investimento'?'#16a34a':'#dc2626'};
+                border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:14px">${i.nome}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:3px">
+          Principal: ${_tesFmt(i.valor_principal)}
+          ${i.taxa_juros?` · Taxa: ${(Number(i.taxa_juros)*100).toFixed(2)}% a.m.`:''}
+          ${i.data_inicio?` · Início: ${i.data_inicio.substring(0,10)}`:''}
+          ${i.data_vencimento?` · Vence: ${i.data_vencimento.substring(0,10)}`:''}
+          ${i.observacoes?`<br/><em>${i.observacoes}</em>`:''}
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-weight:700;font-size:16px;color:${i.tipo==='investimento'?'#16a34a':'#dc2626'}">${_tesFmt(i.saldo_atual??i.valor_principal)}</div>
+        <div style="font-size:11px;color:#94a3b8">${i.saldo_atual!=null?'Saldo atual':'Principal'}</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button onclick="_tesModalEditInv(${i.id})" class="btn-sm neutral">✏️</button>
+        <button onclick="_tesExcluirInv(${i.id})" class="btn-sm danger">🗑</button>
+      </div>
+    </div>`;
+
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+      ${[['Total Investido',totalInv,'#16a34a'],['Total em Dívidas',totalDiv,'#dc2626'],
+         ['Posição Líquida',totalInv-totalDiv,totalInv-totalDiv>=0?'#16a34a':'#dc2626']].map(([l,v,c])=>`
+        <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:14px 18px;flex:1;min-width:130px">
+          <div style="font-size:11px;color:#64748b;font-weight:600">${l}</div>
+          <div style="font-size:18px;font-weight:700;color:${c}">${_tesFmt(v)}</div>
+        </div>`).join('')}
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+      <button onclick="_tesModalNovoInv()" class="func-btn primary">+ Novo Registro</button>
+    </div>
+    <h3 style="font-size:15px;font-weight:700;margin:0 0 10px;color:#16a34a">📈 Investimentos</h3>
+    ${inv.length?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">${inv.map(renderItem).join('')}</div>`
+      :`<p style="color:#94a3b8;margin-bottom:20px">Nenhum investimento cadastrado.</p>`}
+    <h3 style="font-size:15px;font-weight:700;margin:0 0 10px;color:#dc2626">💳 Dívidas</h3>
+    ${div.length?`<div style="display:flex;flex-direction:column;gap:8px">${div.map(renderItem).join('')}</div>`
+      :`<p style="color:#94a3b8">Nenhuma dívida cadastrada.</p>`}`;
+}
+
+function _tesModalNovoInv(d = null) {
+  _tesEditInvId = d?.id || null;
+  const hoje = new Date().toISOString().substring(0, 10);
+  abrirModal(_tesEditInvId ? 'Editar Registro' : 'Novo Registro', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div class="modal-label">Tipo *</div>
+        <select class="modal-input" id="tinv_tipo">
+          <option value="investimento" ${(d?.tipo||'investimento')==='investimento'?'selected':''}>📈 Investimento</option>
+          <option value="divida" ${d?.tipo==='divida'?'selected':''}>💳 Dívida</option>
+        </select></div>
+      <div><div class="modal-label">Nome *</div>
+        <input class="modal-input" id="tinv_nome" value="${d?.nome||''}" placeholder="Ex: CDB Bradesco" /></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div class="modal-label">Valor Principal (R$) *</div>
+        <input class="modal-input" id="tinv_principal" type="number" step="0.01" value="${d?.valor_principal||''}" /></div>
+      <div><div class="modal-label">Saldo Atual (R$)</div>
+        <input class="modal-input" id="tinv_saldo" type="number" step="0.01" value="${d?.saldo_atual||''}" placeholder="Opcional" /></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div><div class="modal-label">Taxa a.m. (%)</div>
+        <input class="modal-input" id="tinv_taxa" type="number" step="0.001" value="${d?.taxa_juros?(Number(d.taxa_juros)*100).toFixed(3):''}" placeholder="1,05" /></div>
+      <div><div class="modal-label">Início *</div>
+        <input class="modal-input" id="tinv_ini" type="date" value="${d?.data_inicio?.substring?.(0,10)||hoje}" /></div>
+      <div><div class="modal-label">Vencimento</div>
+        <input class="modal-input" id="tinv_venc" type="date" value="${d?.data_vencimento?.substring?.(0,10)||''}" /></div>
+    </div>
+    <div><div class="modal-label">Observações</div>
+      <textarea class="modal-input" id="tinv_obs" rows="2">${d?.observacoes||''}</textarea></div>
+    <pre class="modal-result" id="tinv_msg" style="display:none"></pre>`,
+  [{cls:'neutral',action:'fecharModal()',label:'Cancelar'},
+   {cls:'primary',action:'_tesSalvarInv()',label:'Salvar'}]);
+}
+
+async function _tesModalEditInv(id) {
+  const lista = await api('GET', '/financeiro/investimentos');
+  const item = lista.find(i => i.id === id);
+  if (item) _tesModalNovoInv(item);
+}
+
+async function _tesSalvarInv() {
+  const msg = document.getElementById('tinv_msg');
+  const nome = document.getElementById('tinv_nome').value.trim();
+  const principal = parseFloat(document.getElementById('tinv_principal').value);
+  if (!nome || !principal) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Nome e valor principal são obrigatórios.'; return;
+  }
+  const taxaRaw = parseFloat(document.getElementById('tinv_taxa').value);
+  const saldoRaw = document.getElementById('tinv_saldo').value;
+  const payload = {
+    tipo: document.getElementById('tinv_tipo').value, nome,
+    valor_principal: principal,
+    taxa_juros: taxaRaw ? taxaRaw / 100 : null,
+    data_inicio: document.getElementById('tinv_ini').value,
+    data_vencimento: document.getElementById('tinv_venc').value || null,
+    saldo_atual: saldoRaw ? parseFloat(saldoRaw) : null,
+    observacoes: document.getElementById('tinv_obs').value.trim() || null,
+  };
+  try {
+    if (_tesEditInvId) await api('PUT', `/financeiro/investimentos/${_tesEditInvId}`, payload);
+    else               await api('POST', '/financeiro/investimentos', payload);
+    fecharModal(); _tesCarregarAba();
+  } catch(e) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message; }
+}
+
+async function _tesExcluirInv(id) {
+  if (!confirm('Excluir este registro?')) return;
+  await api('DELETE', `/financeiro/investimentos/${id}`); _tesCarregarAba();
+}
+
+// ── 5. Orçamento x Realizado ──────────────────────────────────────────────────
+
+async function _tesOrcamento(el) {
+  const lista = await api('GET', `/financeiro/orcamento?mes=${_tesMes}`);
+  const totalOrc  = lista.reduce((s,r)=>s+r.valor_orcado, 0);
+  const totalReal = lista.reduce((s,r)=>s+r.realizado_saida, 0);
+  const totalRec  = lista.reduce((s,r)=>s+r.realizado_entrada, 0);
+
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+      ${[['Orçado',totalOrc,'#475569'],['Gasto',totalReal,'#dc2626'],
+         ['Recebido',totalRec,'#16a34a'],['Economia',totalOrc-totalReal,totalOrc>=totalReal?'#16a34a':'#dc2626']].map(([l,v,c])=>`
+        <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:14px 18px;flex:1;min-width:120px">
+          <div style="font-size:11px;color:#64748b;font-weight:600">${l}</div>
+          <div style="font-size:17px;font-weight:700;color:${c}">${_tesFmt(v)}</div>
+        </div>`).join('')}
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-size:15px;font-weight:700">Categorias · ${_tesMes}</span>
+      <button onclick="_tesModalOrcamento()" class="func-btn primary">+ Definir Orçamento</button>
+    </div>
+    ${!lista.length ? `<p style="color:#94a3b8;text-align:center;padding:32px">
+        Nenhuma categoria este mês.<br/>
+        <span style="font-size:12px">As categorias dos lançamentos do Fluxo de Caixa aparecem aqui automaticamente.</span>
+      </p>` : `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${lista.map(r => {
+        const perc = r.valor_orcado>0 ? Math.min(100, (r.realizado_saida/r.valor_orcado)*100) : 0;
+        const percCor = perc>100?'#dc2626':perc>75?'#ea580c':'#16a34a';
+        const dif = r.valor_orcado - r.realizado_saida;
+        return `
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+            <span style="font-weight:600;font-size:14px">${r.categoria}</span>
+            <div style="display:flex;gap:16px;font-size:13px;flex-wrap:wrap">
+              <span style="color:#64748b">Orçado: <b>${_tesFmt(r.valor_orcado)}</b></span>
+              <span style="color:#dc2626">Gasto: <b>${_tesFmt(r.realizado_saida)}</b></span>
+              ${r.realizado_entrada?`<span style="color:#16a34a">Recebido: <b>${_tesFmt(r.realizado_entrada)}</b></span>`:''}
+              <span style="color:${dif>=0?'#16a34a':'#dc2626'}">Saldo: <b>${_tesFmt(dif)}</b></span>
+            </div>
+          </div>
+          ${r.valor_orcado>0?`
+          <div style="background:#f1f5f9;border-radius:999px;height:8px;overflow:hidden">
+            <div style="background:${percCor};height:100%;width:${perc}%;border-radius:999px;transition:width 0.3s"></div>
+          </div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px">${perc.toFixed(1)}% do orçamento utilizado</div>`:''}
+        </div>`;
+      }).join('')}
+    </div>`}`;
+}
+
+function _tesModalOrcamento() {
+  abrirModal('Definir Orçamento', `
+    <p style="font-size:13px;color:#64748b;margin:0 0 12px">
+      Define ou atualiza o orçamento de uma categoria para ${_tesMes}.
+    </p>
+    <div><div class="modal-label">Categoria *</div>
+      <input class="modal-input" id="torc_cat" placeholder="Ex: Ágape, Manutenção, Mensalidades…" /></div>
+    <div><div class="modal-label">Valor Orçado (R$) *</div>
+      <input class="modal-input" id="torc_val" type="number" step="0.01" placeholder="0,00" /></div>
+    <pre class="modal-result" id="torc_msg" style="display:none"></pre>`,
+  [{cls:'neutral',action:'fecharModal()',label:'Cancelar'},
+   {cls:'primary',action:'_tesSalvarOrcamento()',label:'Salvar'}]);
+}
+
+async function _tesSalvarOrcamento() {
+  const msg = document.getElementById('torc_msg');
+  const cat = document.getElementById('torc_cat').value.trim();
+  const val = parseFloat(document.getElementById('torc_val').value);
+  if (!cat || isNaN(val) || val < 0) {
+    msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Categoria e valor são obrigatórios.'; return;
+  }
+  try {
+    await api('POST', '/financeiro/orcamento', { categoria: cat, mes_ano: _tesMes, valor_orcado: val });
+    fecharModal(); _tesCarregarAba();
+  } catch(e) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent=e.message; }
 }
 
 // ═══════════════════════════════════════════════════════════
