@@ -1191,18 +1191,23 @@ async function editarIrmao(id) {
   try { ir = await api('GET', `/irmaos/${id}`); }
   catch(e) { alert('Erro ao carregar: ' + e.message); return; }
   const isAdmin = ['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo);
-  if (isAdmin) {
+  const isOwnProfile = ir.usuario_id === state.usuario?.user_id;
+  const podeVerLoja  = isAdmin || (isOwnProfile && state.usuario?.loja_tipo === 'complexo');
+  if (podeVerLoja) {
     try { lojasList = await api('GET', '/lojas'); } catch(_) {}
   }
   const filhosStr = (ir.filhos || []).map(f =>
     f.nome + (f.data_nascimento ? ' / ' + f.data_nascimento : '')
   ).join('\n');
-  const lojaField = isAdmin && lojasList.length
+  const lojaField = podeVerLoja && lojasList.length
     ? `<div class="form-group" style="grid-column:1/-1"><label>Loja</label>
         <select class="modal-input" id="ei_loja_id">
-          ${lojasList.map(l=>`<option value="${l.id}" ${l.id===ir.loja_id?'selected':''}>${l.nome}${l.numero?' nº'+l.numero:''}</option>`).join('')}
-        </select></div>`
+          ${lojasList.filter(l=>l.tipo!=='complexo').map(l=>`<option value="${l.id}" ${l.id===ir.loja_id?'selected':''}>${l.nome}${l.numero?' nº'+l.numero:''}</option>`).join('')}
+        </select>
+        ${isOwnProfile && !state.usuario?.loja_id ? '<div style="font-size:11px;color:#0284c7;margin-top:4px">⚡ Ao salvar, sua conta também será vinculada a esta loja.</div>' : ''}
+        </div>`
     : `<input type="hidden" id="ei_loja_id" value="${ir.loja_id}" />`;
+  const campoUsuarioId = `<input type="hidden" id="ei_usuario_id" value="${ir.usuario_id||''}" />`;
   abrirModal(`Editar — ${ir.nome}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group" style="grid-column:1/-1"><label>Nome completo</label>
@@ -1237,6 +1242,7 @@ async function editarIrmao(id) {
       <div class="form-group" style="grid-column:1/-1"><label>Filhos (nome / data — um por linha)</label>
         <textarea class="modal-input" id="ei_filhos" rows="3">${filhosStr}</textarea></div>
     </div>
+    ${campoUsuarioId}
     <div class="sb-msg" id="eiMsg"></div>
   `, [
     { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
@@ -1269,6 +1275,14 @@ async function salvarEdicaoIrmao(id) {
   };
   try {
     await api('PUT', `/irmaos/${id}`, dados);
+    // Se editando o próprio perfil e sem loja vinculada, sincroniza a conta
+    const irmaoUserId = +document.getElementById('ei_usuario_id')?.value || 0;
+    if (irmaoUserId && irmaoUserId === state.usuario?.user_id && !state.usuario?.loja_id) {
+      try {
+        await api('PUT', `/usuarios/${state.usuario.user_id}/loja`, { loja_id: lojaId });
+        state.usuario.loja_id = lojaId;
+      } catch(_) {}
+    }
     fecharModal();
     renderIrmaoView();
   } catch(e) { document.getElementById('eiMsg').textContent = '⚠ ' + e.message; }
@@ -4815,6 +4829,7 @@ async function renderComplexoDashView() {
     }
     const { complexo, lojas, proximas_sessoes: prox, stats } = d;
     const lojasFilhas = lojas.filter(l => l.id !== complexo.id);
+    const semLoja = !state.usuario?.loja_id;
 
     view.innerHTML = `
       <div class="view-header">
@@ -4824,6 +4839,20 @@ async function renderComplexoDashView() {
         </div>
         <button class="btn-primary" onclick="abrirModulo('lojas')">Gerenciar Lojas</button>
       </div>
+
+      ${semLoja && lojasFilhas.length ? `
+      <div style="background:#fefce8;border:1px solid #fde047;border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="font-size:22px">🏛️</div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-weight:700;font-size:14px;color:#854d0e">Você ainda não está vinculado a uma loja específica</div>
+          <div style="font-size:12px;color:#713f12;margin-top:2px">Selecione abaixo para acessar Tesouraria e demais módulos da loja.</div>
+        </div>
+        <select id="sel_minha_loja" class="modal-input" style="width:220px;margin:0">
+          <option value="">— Escolha sua loja —</option>
+          ${lojasFilhas.map(l=>`<option value="${l.id}">${l.nome}${l.numero?' nº'+l.numero:''}</option>`).join('')}
+        </select>
+        <button class="btn-primary" onclick="_vincularMinhaLoja()">Vincular</button>
+      </div>` : ''}
 
       <!-- Stats -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-bottom:24px">
@@ -4896,6 +4925,17 @@ function _dashCard(icon, val, label, cor) {
     <div style="font-size:26px;font-weight:800;color:${cor};margin:6px 0">${val}</div>
     <div style="font-size:12px;color:var(--muted)">${label}</div>
   </div>`;
+}
+
+async function _vincularMinhaLoja() {
+  const lojaId = +document.getElementById('sel_minha_loja')?.value;
+  if (!lojaId) { alert('Selecione uma loja.'); return; }
+  try {
+    await api('PUT', `/usuarios/${state.usuario.user_id}/loja`, { loja_id: lojaId });
+    state.usuario.loja_id = lojaId;
+    alert('Vinculado com sucesso! Agora você pode acessar Tesouraria e demais módulos da loja.');
+    renderComplexoDashView();
+  } catch(e) { alert('Erro: ' + e.message); }
 }
 
 // ── Vincular usuário a loja (chamado de renderUsuariosView) ───────────────
