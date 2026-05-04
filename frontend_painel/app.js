@@ -350,6 +350,13 @@ const FUNCIONALIDADES = {
     cor: '#0369a1',
     customOnClick: "abrirModulo('ver_contratos')",
   },
+  tesouraria: {
+    icone: '💼', titulo: 'Tesouraria',
+    desc: 'Fluxo de caixa, conciliação bancária, contas a pagar/receber, investimentos e orçamento vs realizado.',
+    quem: 'financeiro, admin_principal, veneravel_mestre',
+    cor: '#0f766e',
+    customOnClick: "abrirModulo('tesouraria')",
+  },
 };
 
 // ═══════════════════════════════════════════════════════════
