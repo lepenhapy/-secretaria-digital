@@ -24,6 +24,7 @@ from backend_api.dependencies import (
     get_compras_service,
     get_current_actor,
     get_database,
+    get_email_service,
     get_file_storage,
     get_permissoes_service,
     get_rateio_service,
