@@ -116,9 +116,11 @@ def get_birthday_service():
 def get_boleto_processor():
     global _boleto_processor
     if _boleto_processor is None:
+        from backend_services.email_service import EmailService
         _boleto_processor = BoletoProcessor(
             db=get_database(),
             whatsapp_service=get_whatsapp_service(),
+            email_service=EmailService(),
         )
     return _boleto_processor
 

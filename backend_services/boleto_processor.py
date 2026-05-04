@@ -16,9 +16,10 @@ from pypdf import PdfReader
 
 
 class BoletoProcessor:
-    def __init__(self, db, whatsapp_service):
-        self.db  = db
-        self.wpp = whatsapp_service
+    def __init__(self, db, whatsapp_service, email_service=None):
+        self.db    = db
+        self.wpp   = whatsapp_service
+        self.email = email_service
 
     # ── API pública ────────────────────────────────────────────────────────
 
@@ -52,18 +53,29 @@ class BoletoProcessor:
         valor = self._extrair_valor(texto)
         caption = self._montar_caption(irmao, valor)
 
+        filename = f"boleto_{irmao['nome'].split()[0].lower()}.pdf"
+        wpp_ok = False
         try:
             self.wpp.send_document(
                 telefone=irmao['telefone'],
                 pdf_bytes=pdf_bytes,
-                filename=f"boleto_{irmao['nome'].split()[0].lower()}.pdf",
+                filename=filename,
                 caption=caption,
             )
+            wpp_ok = True
             resultado['enviado'] = True
-            self._registrar(loja_id, irmao['id'], pdf_bytes, 'enviado', None)
+            self._registrar(loja_id, irmao['id'], pdf_bytes, 'enviado', None, canal='whatsapp')
         except Exception as e:
-            resultado['erro'] = f"Falha ao enviar WhatsApp: {e}"
-            self._registrar(loja_id, irmao['id'], pdf_bytes, 'erro_envio', str(e))
+            resultado['erro'] = f"Falha WhatsApp: {e}"
+
+        if not wpp_ok:
+            email_sent = self._tentar_email(irmao, pdf_bytes, filename, caption)
+            if email_sent:
+                resultado['enviado'] = True
+                resultado['erro'] = None
+                self._registrar(loja_id, irmao['id'], pdf_bytes, 'enviado', None, canal='email')
+            else:
+                self._registrar(loja_id, irmao['id'], pdf_bytes, 'erro_envio', resultado['erro'])
 
         return resultado
 
@@ -143,6 +155,22 @@ class BoletoProcessor:
         ratio = SequenceMatcher(None, nome.upper(), texto[:300]).ratio()
         return max(encontradas / len(partes), ratio)
 
+    def _tentar_email(self, irmao: dict, pdf_bytes: bytes, filename: str, caption: str) -> bool:
+        if not self.email or not self.email.configurado():
+            return False
+        with self.db.transaction() as tx:
+            row = tx.fetch_one(
+                "SELECT u.email FROM usuarios u JOIN irmaos i ON i.usuario_id=u.id WHERE i.id=%s",
+                [irmao['id']],
+            )
+        if not row or not row.get('email'):
+            return False
+        try:
+            self.email.send_boleto(row['email'], irmao['nome'], pdf_bytes, filename, caption)
+            return True
+        except Exception:
+            return False
+
     # ── Helpers ────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -160,16 +188,21 @@ class BoletoProcessor:
         pdf_bytes: bytes,
         status: str,
         erro: Optional[str],
+        canal: Optional[str] = None,
     ) -> None:
         try:
             with self.db.transaction() as tx:
                 tx.execute(
                     """
                     insert into boletos_processados
-                      (loja_id, irmao_id, tamanho_bytes, status, erro, created_at)
-                    values (%s, %s, %s, %s, %s, now())
+                      (loja_id, irmao_id, tamanho_bytes, status, erro,
+                       conteudo, notificado_em, notificado_canal, created_at)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, now())
                     """,
-                    [loja_id, irmao_id, len(pdf_bytes), status, erro],
+                    [loja_id, irmao_id, len(pdf_bytes), status, erro,
+                     pdf_bytes,
+                     datetime.utcnow() if canal else None,
+                     canal],
                 )
         except Exception:
             pass  # tabela pode não existir ainda — migration 017 a criar

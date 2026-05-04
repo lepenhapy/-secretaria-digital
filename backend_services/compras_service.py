@@ -43,7 +43,7 @@ class ComprasService:
                        status: Optional[str] = None, usuario_id: Optional[int] = None,
                        categoria: Optional[str] = None,
                        data_inicio=None, data_fim=None) -> list:
-        filters = ["c.loja_id = %s"]
+        filters = ["c.loja_id = %s", "c.deleted_at IS NULL"]
         params: list = [loja_id]
         if not incluir_ocultos:
             filters.append("c.visivel = TRUE")

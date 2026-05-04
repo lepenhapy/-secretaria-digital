@@ -64,3 +64,22 @@ class EmailService:
             if self.user and self.password:
                 server.login(self.user, self.password)
             server.sendmail(self.from_, to_email, msg.as_string())
+
+    def send_boleto(self, to_email: str, nome_irmao: str,
+                    pdf_bytes: bytes, filename: str, caption: str) -> None:
+        from email.mime.application import MIMEApplication
+        msg = MIMEMultipart()
+        msg['Subject'] = 'Seu boleto — Secretaria Digital'
+        msg['From']    = self.from_
+        msg['To']      = to_email
+        texto = f"Olá {nome_irmao},\n\n{caption}\n\nSecretaria Digital"
+        msg.attach(MIMEText(texto, 'plain', 'utf-8'))
+        pdf_part = MIMEApplication(pdf_bytes, _subtype='pdf')
+        pdf_part.add_header('Content-Disposition', 'attachment', filename=filename)
+        msg.attach(pdf_part)
+        with smtplib.SMTP(self.host, self.port, timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            if self.user and self.password:
+                server.login(self.user, self.password)
+            server.sendmail(self.from_, to_email, msg.as_string())

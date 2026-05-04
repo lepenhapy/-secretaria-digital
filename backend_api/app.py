@@ -605,6 +605,12 @@ def _ensure_schema(db) -> None:
         # ── 035: reembolsos caso_id nullable + compra_id ──────────────────────
         "ALTER TABLE reembolsos ALTER COLUMN caso_id DROP NOT NULL",
         "ALTER TABLE reembolsos ADD COLUMN IF NOT EXISTS compra_id BIGINT REFERENCES compras(id)",
+        # ── 036: compras.deleted_at (corrige DELETE 500) ──────────────────────
+        "ALTER TABLE compras ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+        # ── 037: boletos_processados dispatch tracking ─────────────────────────
+        "ALTER TABLE boletos_processados ADD COLUMN IF NOT EXISTS notificado_em TIMESTAMPTZ",
+        "ALTER TABLE boletos_processados ADD COLUMN IF NOT EXISTS notificado_canal VARCHAR(20)",
+        "ALTER TABLE boletos_processados ADD COLUMN IF NOT EXISTS conteudo BYTEA",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -2036,6 +2042,143 @@ def listar_boletos(
     return processor.listar_processados(loja_id)
 
 
+def _enviar_boleto_unico(boleto_id: int, db, wpp, email_svc=None) -> dict:
+    """Lógica de re-envio compartilhada entre endpoint individual e disparar-todos."""
+    with db.transaction() as tx:
+        boleto = tx.fetch_one(
+            """SELECT bp.*, i.nome AS irmao_nome, i.telefone AS irmao_telefone,
+                      u.email AS irmao_email
+               FROM boletos_processados bp
+               LEFT JOIN irmaos i ON i.id = bp.irmao_id
+               LEFT JOIN usuarios u ON u.id = i.usuario_id
+               WHERE bp.id = %s""",
+            (boleto_id,),
+        )
+    if not boleto:
+        return {"canal": "falhou", "enviado": False, "erro": "Boleto não encontrado"}
+
+    conteudo = boleto.get("conteudo")
+    nome     = boleto.get("irmao_nome") or "Irmão"
+    telefone = boleto.get("irmao_telefone")
+    email    = boleto.get("irmao_email")
+    filename = f"boleto_{nome.split()[0].lower()}.pdf"
+    caption  = f"📄 *Boleto — {nome}*\nSecretaria Digital 🤝"
+    canal = None
+    erro  = None
+
+    if conteudo and telefone:
+        try:
+            wpp.send_document(telefone, conteudo, filename, caption)
+            canal = "whatsapp"
+        except Exception as e:
+            erro = str(e)
+
+    if canal is None and conteudo and email and email_svc and email_svc.configurado():
+        try:
+            email_svc.send_boleto(email, nome, conteudo, filename, caption)
+            canal = "email"
+        except Exception as e:
+            erro = str(e)
+
+    if canal is None and telefone:
+        try:
+            wpp.send_text(telefone, caption)
+            canal = "whatsapp_texto"
+        except Exception as e:
+            erro = str(e)
+
+    if canal:
+        with db.transaction() as tx:
+            tx.execute(
+                "UPDATE boletos_processados SET notificado_em=NOW(), notificado_canal=%s WHERE id=%s",
+                (canal, boleto_id),
+            )
+
+    return {"canal": canal or "falhou", "enviado": canal is not None, "erro": erro}
+
+
+@app.post("/boletos/{boleto_id}/enviar")
+def reenviar_boleto(
+    boleto_id: int,
+    actor: Actor = Depends(get_current_actor),
+    wpp: WhatsAppService = Depends(get_whatsapp_service),
+    db=Depends(get_database),
+):
+    from backend_services.email_service import EmailService
+    return _enviar_boleto_unico(boleto_id, db, wpp, EmailService())
+
+
+@app.post("/boletos/disparar-todos")
+def disparar_boletos(
+    loja_id: int = Query(...),
+    actor: Actor = Depends(get_current_actor),
+    wpp: WhatsAppService = Depends(get_whatsapp_service),
+    db=Depends(get_database),
+):
+    from backend_services.email_service import EmailService
+    email_svc = EmailService()
+    with db.transaction() as tx:
+        boletos = tx.fetch_all(
+            """SELECT id FROM boletos_processados
+               WHERE loja_id=%s AND irmao_id IS NOT NULL AND notificado_em IS NULL
+               ORDER BY created_at DESC""",
+            (loja_id,),
+        )
+    total = len(boletos)
+    enviados = 0
+    falhas = 0
+    for b in boletos:
+        r = _enviar_boleto_unico(b["id"], db, wpp, email_svc)
+        if r["enviado"]:
+            enviados += 1
+        else:
+            falhas += 1
+    return {"total": total, "enviados": enviados, "falhas": falhas}
+
+
+@app.get("/auditoria")
+def listar_auditoria(
+    loja_id: Optional[int] = Query(default=None),
+    data_inicio: Optional[str] = Query(default=None),
+    data_fim: Optional[str] = Query(default=None),
+    modulo: Optional[str] = Query(default=None),
+    limit: int = Query(default=200, le=1000),
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    if actor.cargo != "admin_principal":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao Administrador Principal.")
+    filters: list = []
+    params:  list = []
+    target_loja = loja_id or actor.loja_id
+    if target_loja:
+        filters.append("ae.loja_id = %s"); params.append(target_loja)
+    if data_inicio:
+        filters.append("ae.ocorreu_em >= %s"); params.append(data_inicio)
+    if data_fim:
+        filters.append("ae.ocorreu_em <= %s"); params.append(data_fim + " 23:59:59")
+    if modulo:
+        filters.append("ae.modulo = %s"); params.append(modulo)
+    where = ("WHERE " + " AND ".join(filters)) if filters else ""
+    params.append(limit)
+    with db.transaction() as tx:
+        return tx.fetch_all(
+            f"""SELECT ae.id, ae.ocorreu_em, ae.acao, ae.modulo,
+                       ae.entidade_tipo, ae.entidade_id, ae.detalhes_json,
+                       ae.origem, ae.cargo_snapshot, ae.loja_id,
+                       u.nome  AS usuario_nome,
+                       u.email AS usuario_email,
+                       l.nome  AS loja_nome
+                FROM auditoria_eventos ae
+                LEFT JOIN usuarios u ON u.id = ae.usuario_id
+                LEFT JOIN lojas   l ON l.id = ae.loja_id
+                {where}
+                ORDER BY ae.ocorreu_em DESC
+                LIMIT %s""",
+            params,
+        )
+
+
 # ═══════════════════════════════════════════════════════════
 #  ANIVERSÁRIOS
 # ═══════════════════════════════════════════════════════════
@@ -2863,11 +3006,13 @@ def listar_repositorio(
         compras_arqs = tx.fetch_all(
             f"""SELECT ca.id, 'compra' AS contexto, c.id AS contexto_id,
                        c.evento AS descricao, u.nome AS enviado_por,
+                       c.categoria AS compra_categoria, bp.nome AS bancado_por_nome,
                        ca.tipo, ca.nome_original, ca.tamanho_bytes, ca.criado_em,
                        ca.caminho IS NOT NULL AS disponivel
                 FROM compras_arquivos ca
                 JOIN compras c ON c.id = ca.compra_id
                 JOIN usuarios u ON u.id = c.usuario_id
+                LEFT JOIN irmaos bp ON bp.id = c.bancado_por_irmao_id
                 WHERE {wc}
                 {'AND ca.tipo = %s' if contexto else ''}
                 ORDER BY ca.criado_em DESC""",

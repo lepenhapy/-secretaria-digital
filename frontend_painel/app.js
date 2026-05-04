@@ -504,7 +504,8 @@ function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
    'relatoriosView','permissoesView','comissoesView','repositorioView',
    'agendaView','irmaoDetalheView','usuariosView','inventarioView','whatsappView',
-   'contratosView','tarefasView','lojasView','complexoView','tenantsView'].forEach(v => {
+   'contratosView','tarefasView','lojasView','complexoView','tenantsView',
+   'auditView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -610,6 +611,10 @@ function renderSidebar() {
       <span style="font-size:15px">💬</span><span>WhatsApp</span>
       <span id="wppStatusDot" style="width:8px;height:8px;border-radius:50%;background:#94a3b8;display:inline-block;margin-left:auto"></span>
     </div>` : ''}
+    ${state.usuario?.cargo === 'admin_principal' ? `
+    <div class="sidebar-nav-module" id="nav-auditoria" onclick="abrirModulo('auditoria')">
+      <span style="font-size:15px">📋</span><span>Trilha de Auditoria</span>
+    </div>` : ''}
   `;
 
   // Cargos
@@ -655,6 +660,7 @@ function abrirModulo(id) {
     lojas:          () => { mostrarView('lojasView');      renderLojasView(); },
     complexo_dash:  () => { mostrarView('complexoView');   renderComplexoDashView(); },
     tenants:        () => { mostrarView('tenantsView');    renderTenantsView(); },
+    auditoria:      () => { mostrarView('auditView');      renderAuditoriaView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -1595,12 +1601,19 @@ function renderBoletosView() {
     </div>
 
     <div class="form-card" id="boletoListaCard">
-      <h2>Histórico de processamento</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h2 style="margin:0">Histórico de processamento</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="func-btn neutral" onclick="carregarBoletos()">↻ Atualizar</button>
+          <button class="func-btn primary" onclick="dispararTodosBoletos()" title="Envia via WhatsApp ou e-mail para todos os irmãos identificados ainda não notificados">📤 Disparar Todos</button>
+        </div>
+      </div>
       <div id="boletoLista" style="margin-top:12px;color:#64748b;font-size:14px">
         <button class="func-btn neutral" onclick="carregarBoletos()">Carregar histórico</button>
       </div>
     </div>
   `;
+  carregarBoletos();
 }
 
 async function uploadBoleto() {
@@ -1624,21 +1637,62 @@ async function uploadBoleto() {
 
 async function carregarBoletos() {
   const el = document.getElementById('boletoLista');
+  if (!el) return;
   el.textContent = 'Carregando…';
   try {
-    const loja = document.getElementById('b_loja')?.value || 1;
+    const loja = document.getElementById('b_loja')?.value || state.usuario?.loja_id || 1;
     const data = await api('GET', `/boletos?loja_id=${loja}`);
-    if (!data.length) { el.textContent = 'Nenhum boleto processado ainda.'; return; }
-    el.innerHTML = data.map(b => `
-      <div style="display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid #e2e8f0">
-        <span style="font-size:20px">${b.status === 'enviado' ? '✅' : b.status === 'nao_identificado' ? '❓' : '⚠️'}</span>
-        <div>
+    if (!data.length) { el.innerHTML = '<p style="color:#64748b;font-size:14px">Nenhum boleto processado ainda.</p>'; return; }
+    el.innerHTML = data.map(b => {
+      const icone = b.status === 'enviado' ? '✅' : b.status === 'nao_identificado' ? '❓' : '⚠️';
+      const notif = b.notificado_em
+        ? `<span style="color:#16a34a;font-size:11px">✅ Enviado via ${b.notificado_canal} em ${new Date(b.notificado_em).toLocaleString('pt-BR')}</span>`
+        : (b.irmao_nome
+          ? `<button class="btn-sm primary" id="btn-enviar-${b.id}" onclick="enviarBoleto(${b.id})">📤 Enviar</button>`
+          : '');
+      return `
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #e2e8f0">
+        <span style="font-size:20px;flex-shrink:0">${icone}</span>
+        <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:14px">${b.irmao_nome || 'Não identificado'}</div>
           <div style="font-size:12px;color:#64748b">${b.status} · ${new Date(b.created_at).toLocaleString('pt-BR')}${b.erro ? ' · ' + b.erro : ''}</div>
+          <div style="margin-top:4px">${notif}</div>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   } catch (e) { el.textContent = 'Erro: ' + e.message; }
+}
+
+async function enviarBoleto(boletoId) {
+  const btn = document.getElementById(`btn-enviar-${boletoId}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+  try {
+    const r = await api('POST', `/boletos/${boletoId}/enviar`);
+    if (r.enviado) {
+      if (btn) btn.closest('div[style*="border-bottom"]')?.querySelector('div:last-child')
+        ?.replaceWith(Object.assign(document.createElement('div'), {
+          innerHTML: `<span style="color:#16a34a;font-size:11px">✅ Enviado via ${r.canal}</span>`,
+          style: 'margin-top:4px'
+        }));
+      await carregarBoletos();
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = '📤 Enviar'; }
+      alert('Falha: ' + (r.erro || 'sem canal disponível'));
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Enviar'; }
+    alert('Erro: ' + e.message);
+  }
+}
+
+async function dispararTodosBoletos() {
+  const loja = document.getElementById('b_loja')?.value || state.usuario?.loja_id || 1;
+  if (!confirm('Disparar boletos para todos os irmãos identificados ainda não notificados?\n\nWill tenta WhatsApp primeiro, e-mail como fallback.')) return;
+  try {
+    const r = await api('POST', `/boletos/disparar-todos?loja_id=${loja}`);
+    alert(`Disparo concluído!\n✅ Enviados: ${r.enviados}\n❌ Falhas: ${r.falhas}\nTotal: ${r.total}`);
+    await carregarBoletos();
+  } catch(e) { alert('Erro: ' + e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3177,8 +3231,13 @@ async function carregarRepositorio() {
             <tr>
               <td style="white-space:nowrap">${new Date(a.criado_em).toLocaleString('pt-BR')}</td>
               <td>${a.enviado_por || '—'}</td>
-              <td><span class="badge-ctx ${a.contexto}">${a.contexto}</span></td>
-              <td>${a.descricao || '—'}</td>
+              <td>
+                <span class="badge-ctx ${a.contexto}">${a.contexto === 'compra' ? (a.compra_categoria === 'agape' ? 'Ágape' : 'Compra') : a.contexto}</span>
+              </td>
+              <td>
+                <div>${a.descricao || '—'}</div>
+                ${a.bancado_por_nome ? `<div style="font-size:11px;color:#64748b;margin-top:2px">💰 Bancado por: ${a.bancado_por_nome}</div>` : ''}
+              </td>
               <td>${a.nome_original || a.tipo || '—'}</td>
               <td>${a.tamanho_bytes ? (a.tamanho_bytes / 1024).toFixed(1) + ' KB' : '—'}</td>
               <td style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -5220,6 +5279,117 @@ async function confirmarDeletarTenant(id, nome) {
     await api('DELETE', `/tenants/${id}`);
     renderTenantsView();
   } catch(e) { alert('Erro: ' + e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TRILHA DE AUDITORIA
+// ═══════════════════════════════════════════════════════════
+
+async function renderAuditoriaView() {
+  const el = document.getElementById('auditView');
+  if (!el) return;
+  const hoje = new Date().toISOString().split('T')[0];
+  const m1   = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().split('T')[0];
+  el.innerHTML = `
+    <div class="view-header">
+      <h1>📋 Trilha de Auditoria</h1>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-primary" onclick="exportarAuditTxt()">⬇ Exportar TXT</button>
+        <button class="btn-primary" onclick="imprimirAuditoria()">🖨️ Gerar PDF</button>
+      </div>
+    </div>
+    <div class="filtros-row" style="flex-wrap:wrap;gap:8px">
+      <input type="date" id="aud_ini" value="${m1}" />
+      <input type="date" id="aud_fim" value="${hoje}" />
+      <select id="aud_mod" class="form-input" style="min-width:140px">
+        <option value="">Todos os módulos</option>
+        <option value="contrato">Contrato</option>
+        <option value="financeiro">Financeiro</option>
+        <option value="reembolso">Reembolso</option>
+        <option value="compra">Compra</option>
+        <option value="irmao">Irmão</option>
+        <option value="usuario">Usuário</option>
+        <option value="agenda">Agenda</option>
+        <option value="mensalidade">Mensalidade</option>
+      </select>
+      <button class="btn-primary" onclick="carregarAuditoria()">Filtrar</button>
+    </div>
+    <div id="auditLista" style="margin-top:16px"><div class="loading">Carregando…</div></div>
+  `;
+  await carregarAuditoria();
+}
+
+let _auditData = [];
+
+async function carregarAuditoria() {
+  const el = document.getElementById('auditLista');
+  if (!el) return;
+  el.innerHTML = '<div class="loading">Carregando…</div>';
+  const ini = document.getElementById('aud_ini')?.value || '';
+  const fim = document.getElementById('aud_fim')?.value || '';
+  const mod = document.getElementById('aud_mod')?.value || '';
+  const loja = state.usuario?.loja_id || '';
+  let q = `limit=500`;
+  if (ini) q += `&data_inicio=${ini}`;
+  if (fim) q += `&data_fim=${fim}`;
+  if (mod) q += `&modulo=${mod}`;
+  if (loja) q += `&loja_id=${loja}`;
+  try {
+    _auditData = await api('GET', `/auditoria?${q}`);
+    if (!_auditData.length) { el.innerHTML = '<p class="empty-msg">Nenhum evento encontrado.</p>'; return; }
+    el.innerHTML = `
+      <div style="font-size:12px;color:#64748b;margin-bottom:8px">${_auditData.length} evento(s) encontrado(s)</div>
+      <div style="overflow-x:auto">
+      <table class="relat-table" id="auditTabela">
+        <thead><tr>
+          <th>Data / Hora</th><th>Usuário</th><th>Cargo</th><th>Loja</th>
+          <th>Módulo</th><th>Ação</th><th>Entidade</th><th>Detalhes</th><th>Origem</th>
+        </tr></thead>
+        <tbody>
+          ${_auditData.map(e => {
+            let detalhes = '';
+            try { detalhes = JSON.stringify(e.detalhes_json || {}).replace(/[{}"]/g,'').slice(0,80); } catch(_) {}
+            return `<tr>
+              <td style="white-space:nowrap;font-size:12px">${new Date(e.ocorreu_em).toLocaleString('pt-BR')}</td>
+              <td style="font-size:12px">${e.usuario_nome || e.usuario_email || '—'}</td>
+              <td style="font-size:11px;color:#64748b">${e.cargo_snapshot || '—'}</td>
+              <td style="font-size:12px">${e.loja_nome || '—'}</td>
+              <td><span class="badge-ctx ${e.modulo||''}">${e.modulo || '—'}</span></td>
+              <td style="font-size:12px;font-weight:600">${e.acao || '—'}</td>
+              <td style="font-size:11px;color:#64748b">${e.entidade_tipo||''}${e.entidade_id?' #'+e.entidade_id:''}</td>
+              <td style="font-size:11px;color:#64748b;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${detalhes}">${detalhes || '—'}</td>
+              <td style="font-size:11px">${e.origem || '—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>`;
+  } catch(e) { el.innerHTML = `<p class="error-msg">${e.message}</p>`; }
+}
+
+function exportarAuditTxt() {
+  if (!_auditData.length) { alert('Carregue os dados antes de exportar.'); return; }
+  const linhas = ['TRILHA DE AUDITORIA — Secretaria Digital', '='.repeat(60), ''];
+  for (const e of _auditData) {
+    linhas.push(`Data    : ${new Date(e.ocorreu_em).toLocaleString('pt-BR')}`);
+    linhas.push(`Usuário : ${e.usuario_nome || e.usuario_email || '—'} (${e.cargo_snapshot || '—'})`);
+    linhas.push(`Loja    : ${e.loja_nome || '—'}`);
+    linhas.push(`Módulo  : ${e.modulo || '—'}  |  Ação: ${e.acao || '—'}`);
+    linhas.push(`Entidade: ${e.entidade_tipo || '—'} #${e.entidade_id || '—'}`);
+    linhas.push(`Origem  : ${e.origem || '—'}`);
+    try { if (e.detalhes_json) linhas.push(`Detalhes: ${JSON.stringify(e.detalhes_json)}`); } catch(_) {}
+    linhas.push('-'.repeat(60));
+  }
+  const blob = new Blob([linhas.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `auditoria_${new Date().toISOString().split('T')[0]}.txt`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+function imprimirAuditoria() {
+  if (!_auditData.length) { alert('Carregue os dados antes de gerar PDF.'); return; }
+  window.print();
 }
 
 // ═══════════════════════════════════════════════════════════

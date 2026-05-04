@@ -953,3 +953,14 @@ body {
   transition: background 0.15s;
 }
 .btn-theme-toggle:hover { background: rgba(255,255,255,0.12); }
+
+
+/* Print / PDF — oculta sidebar e controles, mostra apenas conteúdo */
+@media print {
+  .sidebar, .hamburger, .sidebar-overlay, .view-header .btn-primary,
+  .filtros-row, .relat-filtros, #themeToggle { display: none !important; }
+  .layout { grid-template-columns: 1fr !important; }
+  .main { padding: 0 !important; }
+  body { background: #fff !important; }
+  table { font-size: 10px !important; }
+}
