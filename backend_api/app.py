@@ -2817,6 +2817,17 @@ def relatorio_agenda(
     return svc.agenda(loja_id, data_inicio, data_fim)
 
 
+@app.get("/relatorios/financeiro")
+def relatorio_financeiro(
+    loja_id: int = Query(...),
+    data_inicio: Optional[str] = Query(default=None),
+    data_fim: Optional[str] = Query(default=None),
+    actor: Actor = Depends(get_current_actor),
+    svc: RelatoriosService = Depends(get_relatorios_service),
+):
+    return svc.financeiro(loja_id, data_inicio, data_fim)
+
+
 # ═══════════════════════════════════════════════════════════
 #  PERMISSÕES POR CARGO
 # ═══════════════════════════════════════════════════════════

@@ -289,14 +289,14 @@ const FUNCIONALIDADES = {
     icone: '✔️', titulo: 'Aprovar / Rejeitar Reembolso',
     desc: 'Analisa as solicitações de reembolso pendentes e decide aprovação ou rejeição.',
     quem: 'admin, veneravel, 1º vigilante, financeiro, mestre de banquete',
-    cor: '#059669',
+    cor: '#0284c7',
     customOnClick: 'abrirAprovarReembolsoLista()',
   },
   pagar_reembolso: {
     icone: '💳', titulo: 'Marcar como Pago',
     desc: 'Confirma o pagamento de um reembolso aprovado.',
     quem: 'admin_principal, veneravel_mestre, financeiro',
-    cor: '#059669',
+    cor: '#7c3aed',
     campos: [
       { id: 'f_reemb',  label: 'ID do Reembolso', tipo: 'number', valor: '' },
       { id: 'f_valor',  label: 'Valor Pago',       tipo: 'text',   valor: '' },
@@ -2941,18 +2941,23 @@ async function deletarRegra(id) {
 
 async function renderRelatoriosView() {
   const el   = document.getElementById('relatoriosView');
-  const loja = state.usuario?.loja_id || 1;
+  const loja = state.usuario?.loja_id;
   const hoje = new Date().toISOString().split('T')[0];
   const m1   = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().split('T')[0];
+  const isAdmin = state.usuario?.cargo === 'admin_principal';
 
   el.innerHTML = `
     <div class="view-header"><h1>Relatórios</h1></div>
     <div class="relat-tabs">
-      <button class="relat-tab active" onclick="mudarRelat('tesouraria', this)">Tesouraria</button>
+      <button class="relat-tab active" onclick="mudarRelat('reembolsos', this)">Compras & Reembolsos</button>
+      <button class="relat-tab" onclick="mudarRelat('financeiro', this)">Financeiro</button>
       <button class="relat-tab" onclick="mudarRelat('mensalidades', this)">Mensalidades</button>
       <button class="relat-tab" onclick="mudarRelat('agenda', this)">Agenda</button>
     </div>
     <div class="relat-filtros">
+      ${isAdmin && !loja ? `
+      <div class="form-group inline"><label>Loja ID</label>
+        <input type="number" id="relat_loja" value="1" style="width:80px" /></div>` : ''}
       <div class="form-group inline"><label>De</label>
         <input type="date" id="relat_inicio" value="${m1}" /></div>
       <div class="form-group inline"><label>Até</label>
@@ -2967,7 +2972,6 @@ async function renderRelatoriosView() {
   await gerarRelatorio();
 }
 
-let _relatAtivo = 'tesouraria';
 function mudarRelat(tipo, btn) {
   _relatAtivo = tipo;
   document.querySelectorAll('.relat-tab').forEach(b => b.classList.remove('active'));
@@ -2975,7 +2979,14 @@ function mudarRelat(tipo, btn) {
   gerarRelatorio();
 }
 
+let _relatAtivo = 'reembolsos';
 let _chartInstances = [];
+
+function _relatLojaId() {
+  return document.getElementById('relat_loja')?.value
+    ? +document.getElementById('relat_loja').value
+    : (state.usuario?.loja_id || 1);
+}
 
 function _destruirCharts() {
   _chartInstances.forEach(c => { try { c.destroy(); } catch(_) {} });
@@ -2983,7 +2994,7 @@ function _destruirCharts() {
 }
 
 async function gerarRelatorio() {
-  const loja  = state.usuario?.loja_id || 1;
+  const loja  = _relatLojaId();
   const ini   = document.getElementById('relat_inicio')?.value || '';
   const fim   = document.getElementById('relat_fim')?.value || '';
   const ocultos = document.getElementById('relat_ocultos')?.checked ? 'true' : 'false';
@@ -2995,9 +3006,12 @@ async function gerarRelatorio() {
   try {
     let html = '';
     let dados = null;
-    if (_relatAtivo === 'tesouraria') {
+    if (_relatAtivo === 'reembolsos') {
       dados = await api('GET', `/relatorios/tesouraria?loja_id=${loja}&incluir_ocultos=${ocultos}&data_inicio=${ini}&data_fim=${fim}`);
       html = renderRelatTesouraria(dados);
+    } else if (_relatAtivo === 'financeiro') {
+      dados = await api('GET', `/relatorios/financeiro?loja_id=${loja}&data_inicio=${ini}&data_fim=${fim}`);
+      html = renderRelatFinanceiro(dados);
     } else if (_relatAtivo === 'mensalidades') {
       dados = await api('GET', `/relatorios/mensalidades?loja_id=${loja}&data_inicio=${ini}&data_fim=${fim}`);
       html = renderRelatMensalidades(dados);
@@ -3017,7 +3031,7 @@ function _renderCharts(tipo, dados) {
   Chart.defaults.font.family = "'Inter', 'Segoe UI', sans-serif";
   Chart.defaults.font.size = 12;
 
-  if (tipo === 'tesouraria') {
+  if (tipo === 'reembolsos') {
     // Gráfico 1: Aprovado / Pendente / Rejeitado (doughnut)
     const c1 = document.getElementById('chartStatus');
     if (c1) {
@@ -3173,6 +3187,85 @@ function renderRelatMensalidades(rows) {
     </table>`;
 }
 
+function renderRelatFinanceiro(r) {
+  const fmt = v => `R$ ${parseFloat(v||0).toFixed(2)}`;
+  const entradas = fmt(r.total_entradas);
+  const saidas   = fmt(r.total_saidas);
+  const saldo    = parseFloat(r.saldo_periodo||0);
+  const cor      = saldo >= 0 ? '#16a34a' : '#dc2626';
+
+  const contasPagar  = (r.contas||[]).filter(c => c.tipo === 'pagar');
+  const contasReceber= (r.contas||[]).filter(c => c.tipo === 'receber');
+  const totalPagar   = contasPagar.reduce((s,c)=>s+parseFloat(c.valor||0),0);
+  const totalReceber = contasReceber.reduce((s,c)=>s+parseFloat(c.valor||0),0);
+
+  const invAtivos = (r.investimentos||[]).filter(i=>i.tipo==='investimento');
+  const dividas   = (r.investimentos||[]).filter(i=>i.tipo==='divida');
+  const totalInv  = invAtivos.reduce((s,i)=>s+parseFloat(i.valor||0),0);
+  const totalDiv  = dividas.reduce((s,i)=>s+parseFloat(i.valor||0),0);
+
+  return `
+    <div class="relat-resumo">
+      <div class="relat-card green"><div class="relat-val">${entradas}</div><div>Entradas</div></div>
+      <div class="relat-card red"><div class="relat-val">${saidas}</div><div>Saídas</div></div>
+      <div class="relat-card" style="border-left:4px solid ${cor}">
+        <div class="relat-val" style="color:${cor}">${fmt(saldo)}</div><div>Saldo do Período</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0">
+      <div class="form-card">
+        <div style="font-weight:600;margin-bottom:8px">📤 Contas a Pagar (${contasPagar.length})</div>
+        <div style="font-size:20px;font-weight:700;color:#dc2626">${fmt(totalPagar)}</div>
+      </div>
+      <div class="form-card">
+        <div style="font-weight:600;margin-bottom:8px">📥 Contas a Receber (${contasReceber.length})</div>
+        <div style="font-size:20px;font-weight:700;color:#16a34a">${fmt(totalReceber)}</div>
+      </div>
+      <div class="form-card">
+        <div style="font-weight:600;margin-bottom:8px">📈 Investimentos (${invAtivos.length})</div>
+        <div style="font-size:20px;font-weight:700;color:#0284c7">${fmt(totalInv)}</div>
+      </div>
+      <div class="form-card">
+        <div style="font-weight:600;margin-bottom:8px">💳 Dívidas (${dividas.length})</div>
+        <div style="font-size:20px;font-weight:700;color:#7c3aed">${fmt(totalDiv)}</div>
+      </div>
+    </div>
+
+    ${r.orcamento?.length ? `
+    <h3 style="margin:20px 0 8px">Orçamento vs Realizado</h3>
+    <table class="relat-table">
+      <thead><tr><th>Mês</th><th>Categoria</th><th>Orçado</th><th>Realizado</th><th>%</th></tr></thead>
+      <tbody>${r.orcamento.map(o => {
+        const pct = o.valor_orcado > 0 ? Math.round(parseFloat(o.valor_realizado)/parseFloat(o.valor_orcado)*100) : 0;
+        const cor2 = pct > 100 ? '#dc2626' : pct > 80 ? '#f59e0b' : '#16a34a';
+        return `<tr>
+          <td>${o.mes_ano}</td><td>${o.categoria}</td>
+          <td>${fmt(o.valor_orcado)}</td>
+          <td style="color:${cor2}">${fmt(o.valor_realizado)}</td>
+          <td><span style="color:${cor2};font-weight:600">${pct}%</span></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>` : ''}
+
+    <h3 style="margin:20px 0 8px">Lançamentos do Período</h3>
+    ${!r.lancamentos?.length ? '<p class="empty-msg">Nenhum lançamento no período.</p>' : `
+    <table class="relat-table">
+      <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Valor</th><th>Conciliado</th></tr></thead>
+      <tbody>${r.lancamentos.map(l => `
+        <tr>
+          <td>${new Date(l.data_lancamento).toLocaleDateString('pt-BR')}</td>
+          <td><span class="badge-status ${l.tipo==='entrada'?'aprovado':'pendente'}">${l.tipo}</span></td>
+          <td>${l.categoria||'—'}</td>
+          <td>${l.descricao}</td>
+          <td style="color:${l.tipo==='entrada'?'#16a34a':'#dc2626'}">${fmt(l.valor)}</td>
+          <td>${l.conciliado ? '✅' : '—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`}
+  `;
+}
+
 function renderRelatAgenda(rows) {
   if (!rows.length) return '<p class="empty-msg">Nenhum evento no período.</p>';
   return `
@@ -3183,14 +3276,14 @@ function renderRelatAgenda(rows) {
       </div>
     </div>
     <table class="relat-table">
-      <thead><tr><th>Data</th><th>Horário</th><th>Título</th><th>Tipo</th><th>Status</th></tr></thead>
+      <thead><tr><th>Data</th><th>Horário</th><th>Título</th><th>Tipo</th><th>Local</th></tr></thead>
       <tbody>${rows.map(r => `
         <tr>
-          <td>${new Date(r.data_evento + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
-          <td>${r.hora_inicio} – ${r.hora_fim}</td>
+          <td>${new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
+          <td>${String(r.hora_inicio||'').slice(0,5)} – ${String(r.hora_fim||'').slice(0,5)}</td>
           <td>${r.titulo}</td>
           <td>${r.tipo}</td>
-          <td>${r.status}</td>
+          <td>${r.local||'—'}</td>
         </tr>`).join('')}
       </tbody>
     </table>`;
