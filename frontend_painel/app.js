@@ -619,10 +619,9 @@ function renderSidebar() {
       <span style="font-size:15px">💬</span><span>WhatsApp</span>
       <span id="wppStatusDot" style="width:8px;height:8px;border-radius:50%;background:#94a3b8;display:inline-block;margin-left:auto"></span>
     </div>` : ''}
-    ${['admin_principal','veneravel_mestre','financeiro'].includes(state.usuario?.cargo) ? `
     <div class="sidebar-nav-module" id="nav-tesouraria" onclick="abrirModulo('tesouraria')">
       <span style="font-size:15px">💼</span><span>Tesouraria</span>
-    </div>` : ''}
+    </div>
     ${state.usuario?.cargo === 'admin_principal' ? `
     <div class="sidebar-nav-module" id="nav-auditoria" onclick="abrirModulo('auditoria')">
       <span style="font-size:15px">📋</span><span>Trilha de Auditoria</span>
@@ -5564,6 +5563,17 @@ function _tesBadge(status) {
 async function renderTesourariaView() {
   const view = document.getElementById('tesourariaView');
   if (!view) return;
+
+  if (!state.usuario?.loja_id) {
+    view.innerHTML = `<div style="padding:40px;text-align:center;color:#64748b">
+      <div style="font-size:40px;margin-bottom:12px">🏛️</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px">Usuário sem loja vinculada</div>
+      <div style="font-size:13px;line-height:1.6">Para acessar a Tesouraria, seu usuário precisa estar associado a uma loja.<br>
+      Acesse <strong>Gestão de Usuários</strong> e vincule sua loja, ou peça ao administrador.</div>
+    </div>`;
+    return;
+  }
+
   try { _tesBancarias = await api('GET', '/financeiro/contas-bancarias'); } catch(_) { _tesBancarias = []; }
 
   const abas = [
