@@ -3214,8 +3214,8 @@ function renderRelatFinanceiro(r) {
 
   const invAtivos = (r.investimentos||[]).filter(i=>i.tipo==='investimento');
   const dividas   = (r.investimentos||[]).filter(i=>i.tipo==='divida');
-  const totalInv  = invAtivos.reduce((s,i)=>s+parseFloat(i.valor||0),0);
-  const totalDiv  = dividas.reduce((s,i)=>s+parseFloat(i.valor||0),0);
+  const totalInv  = invAtivos.reduce((s,i)=>s+parseFloat(i.saldo_atual??i.valor_principal||0),0);
+  const totalDiv  = dividas.reduce((s,i)=>s+parseFloat(i.saldo_atual??i.valor_principal||0),0);
 
   return `
     <div class="relat-resumo">

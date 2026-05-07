@@ -140,7 +140,7 @@ class RelatoriosService:
     def financeiro(self, loja_id: int, data_inicio=None, data_fim=None) -> dict:
         with self.db.transaction() as tx:
             # Lançamentos do fluxo de caixa
-            lf_filters = ["loja_id = %s"]
+            lf_filters = ["loja_id = %s", "deleted_at IS NULL"]
             lf_params: list = [loja_id]
             if data_inicio:
                 lf_filters.append("data_lancamento >= %s")
@@ -167,7 +167,7 @@ class RelatoriosService:
             )
 
             # Contas a pagar/receber
-            cf_filters = ["loja_id = %s"]
+            cf_filters = ["loja_id = %s", "deleted_at IS NULL"]
             cf_params: list = [loja_id]
             if data_inicio:
                 cf_filters.append("vencimento >= %s")
@@ -178,7 +178,7 @@ class RelatoriosService:
             cf_where = " AND ".join(cf_filters)
 
             contas = tx.fetch_all(
-                f"""SELECT tipo, descricao, valor, status, vencimento, categoria
+                f"""SELECT tipo, descricao, beneficiario, valor, status, vencimento, data_pagamento
                     FROM contas_financeiras
                     WHERE {cf_where} ORDER BY vencimento""",
                 cf_params,
@@ -193,9 +193,12 @@ class RelatoriosService:
                 cf_params,
             )
 
-            # Investimentos e dívidas (sem filtro de período — são posições atuais)
+            # Investimentos e dívidas (posições atuais, sem filtro de período)
             inv = tx.fetch_all(
-                "SELECT tipo, descricao, valor, taxa_juros, vencimento FROM investimentos_dividas WHERE loja_id=%s ORDER BY tipo, descricao",
+                """SELECT tipo, nome, valor_principal, taxa_juros,
+                          data_inicio, data_vencimento, saldo_atual, observacoes
+                   FROM investimentos_dividas
+                   WHERE loja_id=%s AND deleted_at IS NULL ORDER BY tipo, nome""",
                 [loja_id],
             )
 
