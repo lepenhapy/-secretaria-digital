@@ -616,9 +616,9 @@ async function salvarSetupIrmao() {
       cim:      document.getElementById('setup_cim')?.value.trim() || null,
       telefone: document.getElementById('setup_tel')?.value.trim() || null,
     });
-    // Vincular usuário à loja escolhida
-    await api('PUT', `/usuarios/${state.usuario.user_id}/loja`, { loja_id: lojaId });
-    state.usuario.loja_id = lojaId;
+    // Vincular o irmão criado ao usuário logado (define usuario_id no irmão e loja_id no usuário)
+    await api('PUT', `/irmaos/${ir.irmao_id}/vincular-usuario`);
+    state.usuario.loja_id  = lojaId;
     state.usuario.irmao_id = ir.irmao_id;
     localStorage.setItem('sd_usuario', JSON.stringify(state.usuario));
     msg.className = 'modal-result ok';

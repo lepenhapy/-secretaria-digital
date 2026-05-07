@@ -1771,6 +1771,30 @@ def listar_irmaos(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.put("/irmaos/{irmao_id}/vincular-usuario")
+def vincular_irmao_usuario(
+    irmao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        irmao = tx.fetch_one(
+            "SELECT id, loja_id FROM irmaos WHERE id=%s AND deleted_at IS NULL", [irmao_id]
+        )
+        if not irmao:
+            raise HTTPException(status_code=404, detail="Irmão não encontrado.")
+        tx.execute(
+            "UPDATE irmaos SET usuario_id=%s, updated_at=now() WHERE id=%s",
+            [actor.user_id, irmao_id],
+        )
+        if not actor.loja_id:
+            tx.execute(
+                "UPDATE usuarios SET loja_id=%s, updated_at=now() WHERE id=%s",
+                [irmao["loja_id"], actor.user_id],
+            )
+    return {"ok": True}
+
+
 @app.post("/irmaos/{irmao_id}/mensalidade", status_code=201)
 def definir_mensalidade(
     irmao_id: int,
