@@ -1727,12 +1727,31 @@ def criar_irmao(
 
 @app.get("/irmaos")
 def listar_irmaos(
-    loja_id: int = Query(...),
+    loja_id: Optional[int] = Query(default=None),
+    buscar: Optional[str] = Query(default=None),
     actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
     reg: RegistrationService = Depends(get_registration_service),
 ):
+    # Admin sem loja pode buscar por nome em todas as lojas
+    if buscar and actor.cargo == "admin_principal":
+        with db.transaction() as tx:
+            rows = tx.fetch_all(
+                """SELECT i.id, i.nome, i.loja_id, l.nome AS loja_nome,
+                          i.cim, i.status, i.cargo_loja, i.usuario_id
+                   FROM irmaos i
+                   LEFT JOIN lojas l ON l.id = i.loja_id
+                   WHERE i.deleted_at IS NULL AND i.nome ILIKE %s
+                   ORDER BY i.nome LIMIT 50""",
+                [f"%{buscar}%"],
+            )
+        return [dict(r) for r in rows]
+
+    lid = loja_id or actor.loja_id
+    if not lid:
+        return []
     try:
-        return reg.listar_irmaos(loja_id=loja_id)
+        return reg.listar_irmaos(loja_id=lid)
     except DomainError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

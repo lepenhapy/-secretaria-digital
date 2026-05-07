@@ -887,6 +887,20 @@ function tagMensalidade(cat) {
   return c ? `<span class="tag tag-regular">${c.nome || c.id}</span>` : (cat ? `<span class="tag tag-regular">${cat}</span>` : '');
 }
 
+function _cardActionsIrmao(ir, isAdminOverride) {
+  const cargo = state.usuario?.cargo;
+  const isAdmin = isAdminOverride ?? ['admin_principal','veneravel_mestre'].includes(cargo);
+  const isSecretary = cargo === 'secretario';
+  const isOwn = ir.usuario_id && ir.usuario_id == state.usuario?.user_id;
+  const podeEditar = isAdmin || isSecretary || isOwn;
+  const podeExcluir = isAdmin;
+  if (!podeEditar) return '';
+  return `<div class="irmao-card-actions" onclick="event.stopPropagation()">
+    <button class="func-btn neutral" onclick="editarIrmao(${ir.id})">✏ Editar</button>
+    ${podeExcluir ? `<button class="func-btn danger" onclick="excluirIrmao(${ir.id})">🗑</button>` : ''}
+  </div>`;
+}
+
 async function renderIrmaoView() {
   const view = document.getElementById('irmaoView');
   const loja = state.usuario?.loja_id || 1;
@@ -946,10 +960,7 @@ async function renderIrmaoView() {
           ${tagMensalidade(ir.mensalidade_categoria || ir.mensalidade)}
           ${anivProximo(ir.nascimento) ? '<span class="tag tag-aniv">🎂 Aniversário próximo</span>' : ''}
         </div>
-        <div class="irmao-card-actions" onclick="event.stopPropagation()">
-          <button class="func-btn neutral" onclick="editarIrmao(${ir.id})">✏ Editar</button>
-          <button class="func-btn danger"  onclick="excluirIrmao(${ir.id})">🗑 Excluir</button>
-        </div>
+        ${_cardActionsIrmao(ir, isAdmin)}
       </div>
     `;
   }).join('');
@@ -1048,6 +1059,12 @@ async function renderIrmaoView() {
       <input class="form-input" id="irmaoSearch" type="search" placeholder="Buscar por nome ou CIM…"
         style="flex:1;min-width:180px;max-width:320px"
         oninput="filtrarIrmaos()" />
+      ${isAdmin ? `<div style="display:flex;gap:6px;align-items:center">
+        <input class="form-input" id="irmaoGlobalSearch" type="search" placeholder="Busca global (todas as lojas)…"
+          style="min-width:200px;max-width:280px"
+          onkeydown="if(event.key==='Enter')buscarIrmaoGlobal()" />
+        <button class="func-btn neutral" onclick="buscarIrmaoGlobal()">🔍</button>
+      </div>` : ''}
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         ${['todos','ativo','irregular','licenca','suspenso','falecido'].map(s => `
           <button class="relat-tab${s==='ativo'?' active':''}" id="filtro-${s}"
@@ -1057,6 +1074,7 @@ async function renderIrmaoView() {
     <div class="section-title" style="margin-bottom:16px" id="irmaoContador">Irmãos cadastrados (${irmaos.length})</div>
     <div class="irmao-grid" id="irmaoGrid">${irmaoCards}</div>
     <div id="irmaoPaginator" style="display:flex;justify-content:center;gap:8px;margin-top:16px;flex-wrap:wrap"></div>
+    <div id="irmaoGlobalResults" style="display:none;margin-top:24px"></div>
   `;
 }
 
@@ -1121,10 +1139,7 @@ function renderIrmaoGrid() {
           ${tagMensalidade(ir.mensalidade_categoria)}
           ${anivProximo(ir.nascimento) ? '<span class="tag tag-aniv">🎂 Próx.</span>' : ''}
         </div>
-        <div class="irmao-card-actions" onclick="event.stopPropagation()">
-          <button class="func-btn neutral" onclick="editarIrmao(${ir.id})">✏ Editar</button>
-          <button class="func-btn danger"  onclick="excluirIrmao(${ir.id})">🗑</button>
-        </div>
+        ${_cardActionsIrmao(ir)}
       </div>`;
   }).join('') || '<div style="color:#94a3b8;padding:24px;text-align:center">Nenhum irmão encontrado.</div>';
 
@@ -1133,6 +1148,40 @@ function renderIrmaoGrid() {
        <span style="font-size:13px;color:#64748b;align-self:center">Página ${_irmaoPage+1} de ${pages}</span>
        ${_irmaoPage < pages-1 ? `<button class="func-btn neutral" onclick="_irmaoPage++;renderIrmaoGrid()">Próximo →</button>` : ''}`
     : '';
+}
+
+async function buscarIrmaoGlobal() {
+  const q = (document.getElementById('irmaoGlobalSearch')?.value || '').trim();
+  const area = document.getElementById('irmaoGlobalResults');
+  if (!area) return;
+  if (!q || q.length < 2) { area.style.display = 'none'; return; }
+  area.style.display = 'block';
+  area.innerHTML = '<div style="color:#64748b;padding:12px">Buscando…</div>';
+  try {
+    const rows = await api('GET', `/irmaos?buscar=${encodeURIComponent(q)}`);
+    if (!rows.length) {
+      area.innerHTML = '<div style="color:#94a3b8;padding:12px">Nenhum irmão encontrado em nenhuma loja.</div>';
+      return;
+    }
+    area.innerHTML = `
+      <div class="section-title" style="margin-bottom:12px">Resultados globais para "${q}" (${rows.length})</div>
+      <div class="irmao-grid">${rows.map(ir => `
+        <div class="irmao-card" onclick="abrirIrmao(${ir.id})" style="cursor:pointer">
+          <div class="irmao-card-top">
+            <div class="irmao-avatar">${ir.nome[0].toUpperCase()}</div>
+            <div style="flex:1;min-width:0">
+              <div class="irmao-card-name">${ir.nome}</div>
+              <div class="irmao-card-cim">CIM ${ir.cim || '—'}</div>
+              <div style="font-size:11px;color:#64748b;margin-top:2px">📍 ${ir.loja_nome || 'Loja #' + ir.loja_id}</div>
+            </div>
+          </div>
+          <div class="irmao-card-tags">${tagStatus(ir.status)}</div>
+          ${_cardActionsIrmao(ir)}
+        </div>`).join('')}
+      </div>`;
+  } catch(e) {
+    area.innerHTML = `<div style="color:#ef4444;padding:12px">Erro: ${e.message || e}</div>`;
+  }
 }
 
 function toggleFormIrmao() {
