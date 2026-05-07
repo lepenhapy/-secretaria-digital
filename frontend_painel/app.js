@@ -546,6 +546,88 @@ function renderAutenticado(me) {
   mostrarView('homeView');
   atualizarNavAtivo();
   atualizarBadgeNotif();
+  // Prompt setup de irmão para usuários sem perfil
+  if (!me.irmao_id) _verificarSetupIrmao(me);
+}
+
+async function _verificarSetupIrmao(me) {
+  // Admins e VM não precisam de perfil de irmão
+  if (['admin_principal','veneravel_mestre'].includes(me.cargo)) return;
+  // Pequeno delay para não aparecer antes da home carregar
+  await new Promise(r => setTimeout(r, 600));
+  abrirSetupIrmao(me);
+}
+
+async function abrirSetupIrmao(me) {
+  let lojas = [];
+  try { lojas = await fetch('/lojas/publico').then(r=>r.json()); } catch(_) {}
+
+  const lojaOpts = lojas.length
+    ? lojas.map(l=>`<option value="${l.id}">${l.nome}${l.numero?' nº'+l.numero:''}</option>`).join('')
+    : `<option value="">— sem lojas cadastradas —</option>`;
+
+  const body = document.getElementById('modalBody');
+  const footer = document.getElementById('modalFooter');
+  const title = document.getElementById('modalTitle');
+  title.textContent = 'Complete seu perfil de irmão';
+  body.innerHTML = `
+    <div style="font-size:13px;color:#64748b;margin-bottom:16px;line-height:1.5">
+      Sua conta foi criada, mas você ainda não tem um perfil de irmão vinculado.<br/>
+      Preencha os dados abaixo para aparecer na lista da loja.
+    </div>
+    <div class="form-grid" style="gap:12px">
+      <div class="form-group">
+        <label class="form-label">Nome completo</label>
+        <input class="modal-input" id="setup_nome" type="text" value="${me.nome||''}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sua Loja</label>
+        <select class="modal-input" id="setup_loja">${lojaOpts}</select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">CIM</label>
+        <input class="modal-input" id="setup_cim" type="text" placeholder="Número CIM (opcional)" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">WhatsApp</label>
+        <input class="modal-input" id="setup_tel" type="text" placeholder="(DDD) 9xxxx-xxxx" />
+      </div>
+    </div>
+    <pre class="modal-result" id="setupMsg" style="display:none"></pre>`;
+  footer.innerHTML = `
+    <button class="func-btn neutral" onclick="fecharModal()">Agora não</button>
+    <button class="func-btn primary" onclick="salvarSetupIrmao()">Criar meu perfil</button>`;
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+async function salvarSetupIrmao() {
+  const msg = document.getElementById('setupMsg');
+  msg.style.display = 'block';
+  msg.className = 'modal-result';
+  msg.textContent = 'Salvando…';
+  const lojaId = parseInt(document.getElementById('setup_loja')?.value);
+  if (!lojaId) { msg.className='modal-result error'; msg.textContent='Selecione sua loja.'; return; }
+  const nome = document.getElementById('setup_nome')?.value.trim();
+  if (!nome) { msg.className='modal-result error'; msg.textContent='Informe seu nome.'; return; }
+  try {
+    const ir = await api('POST', '/irmaos', {
+      loja_id: lojaId,
+      nome,
+      cim:      document.getElementById('setup_cim')?.value.trim() || null,
+      telefone: document.getElementById('setup_tel')?.value.trim() || null,
+    });
+    // Vincular usuário à loja escolhida
+    await api('PUT', `/usuarios/${state.usuario.user_id}/loja`, { loja_id: lojaId });
+    state.usuario.loja_id = lojaId;
+    state.usuario.irmao_id = ir.irmao_id;
+    localStorage.setItem('sd_usuario', JSON.stringify(state.usuario));
+    msg.className = 'modal-result ok';
+    msg.textContent = 'Perfil criado! Você agora aparece na lista da loja.';
+    setTimeout(() => fecharModal(), 1200);
+  } catch(e) {
+    msg.className = 'modal-result error';
+    msg.textContent = '⚠ ' + (e.data?.detail || e.message);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

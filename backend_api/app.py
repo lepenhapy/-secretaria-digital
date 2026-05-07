@@ -891,6 +891,10 @@ def me(actor: Actor = Depends(get_current_actor), db=Depends(get_database)):
                 "SELECT nome, tipo, numero, complexo_id FROM lojas WHERE id=%s AND deleted_at IS NULL",
                 (actor.loja_id,),
             )
+        irmao = tx.fetch_one(
+            "SELECT id FROM irmaos WHERE usuario_id = %s AND deleted_at IS NULL LIMIT 1",
+            [actor.user_id],
+        )
     return {
         "user_id":   actor.user_id,
         "loja_id":   actor.loja_id,
@@ -903,6 +907,7 @@ def me(actor: Actor = Depends(get_current_actor), db=Depends(get_database)):
         "loja_complexo_id": loja["complexo_id"] if loja else None,
         "tenant_id":     actor.tenant_id,
         "tenant_status": actor.tenant_status,
+        "irmao_id":  irmao["id"] if irmao else None,
     }
 
 
@@ -939,6 +944,16 @@ class LojaUpdateInput(BaseModel):
 class VincularLojaInput(BaseModel):
     loja_id: Optional[int] = None
     cargo: Optional[str] = None
+
+
+@app.get("/lojas/publico")
+def listar_lojas_publico(db=Depends(get_database)):
+    with db.transaction() as tx:
+        rows = tx.fetch_all(
+            "SELECT id, nome, numero, tipo FROM lojas WHERE deleted_at IS NULL AND tipo != 'complexo' ORDER BY nome",
+            [],
+        )
+    return [dict(r) for r in rows]
 
 
 @app.get("/lojas")
