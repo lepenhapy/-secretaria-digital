@@ -513,7 +513,7 @@ function mostrarView(id) {
    'relatoriosView','permissoesView','comissoesView','repositorioView',
    'agendaView','irmaoDetalheView','usuariosView','inventarioView','whatsappView',
    'contratosView','tarefasView','lojasView','complexoView','tenantsView',
-   'auditView','tesourariaView'].forEach(v => {
+   'auditView','tesourariaView','bebidasView'].forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.display = v === id ? 'block' : 'none';
   });
@@ -653,6 +653,9 @@ function renderSidebar() {
     <div class="sidebar-nav-module" id="nav-presencas" onclick="abrirModulo('presencas')">
       <span style="font-size:15px">✅</span><span>Presenças</span>
     </div>
+    <div class="sidebar-nav-module" id="nav-bebidas" onclick="abrirModulo('bebidas')">
+      <span style="font-size:15px">🍺</span><span>Calculadora de Bebidas</span>
+    </div>
     <div class="sidebar-nav-module" id="nav-mensalidades" onclick="abrirModulo('mensalidades')">
       <span style="font-size:15px">💰</span><span>Mensalidades</span>
     </div>
@@ -755,6 +758,7 @@ function abrirModulo(id) {
     complexo_dash:  () => { mostrarView('complexoView');   renderComplexoDashView(); },
     tenants:        () => { mostrarView('tenantsView');    renderTenantsView(); },
     auditoria:      () => { mostrarView('auditView');      renderAuditoriaView(); },
+    bebidas:        () => { mostrarView('bebidasView');    renderBebidasView(); },
   };
   handlers[id]?.();
   _navClick();
@@ -1370,6 +1374,8 @@ async function editarIrmao(id) {
         <select class="modal-input" id="ei_status">
           ${STATUS_IRMAO.map(s => `<option value="${s.v}" ${(ir.status||'ativo')===s.v?'selected':''}>${s.label}</option>`).join('')}
         </select></div>
+      <div class="form-group" style="grid-column:1/-1"><label>Chave PIX</label>
+        <input class="modal-input" id="ei_pix" value="${(ir.chave_pix||'').replace(/"/g,'&quot;')}" placeholder="CPF, e-mail, telefone ou chave aleatória" /></div>
       <div class="form-group" style="grid-column:1/-1"><label>Filhos (nome / data — um por linha)</label>
         <textarea class="modal-input" id="ei_filhos" rows="3">${filhosStr}</textarea></div>
     </div>
@@ -1402,6 +1408,7 @@ async function salvarEdicaoIrmao(id) {
     grau:              parseInt(document.getElementById('ei_grau')?.value)||1,
     status:            document.getElementById('ei_status')?.value||'ativo',
     data_elevacao:     document.getElementById('ei_elevacao')?.value||null,
+    chave_pix:         document.getElementById('ei_pix')?.value.trim()||null,
     filhos,
   };
   try {
@@ -6344,6 +6351,256 @@ function _syncThemeBtn() {
   if (!btn) return;
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   btn.textContent = isDark ? '☀️  Modo Claro' : '🌙  Modo Escuro';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CALCULADORA DE BEBIDAS
+// ═══════════════════════════════════════════════════════════
+
+async function renderBebidasView() {
+  const el = document.getElementById('bebidasView');
+  el.innerHTML = '<div style="padding:32px;text-align:center;color:#64748b">Carregando sessões…</div>';
+  const lojaId = state.usuario?.loja_id;
+  if (!lojaId) { el.innerHTML = '<div style="padding:32px;color:#ef4444">Sua conta não está vinculada a uma loja.</div>'; return; }
+
+  let sessoes = [];
+  try { sessoes = await api('GET', '/bebidas/sessao'); }
+  catch(e) { el.innerHTML = `<div style="padding:32px;color:#ef4444">Erro: ${e.message}</div>`; return; }
+
+  const cards = sessoes.map(s => {
+    const pct = s.n_participantes > 0 ? Math.round(s.n_pagos / s.n_participantes * 100) : 0;
+    const statusBadge = s.status === 'aberta'
+      ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Aberta</span>'
+      : '<span style="background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Fechada</span>';
+    const pendente = parseFloat(s.pendente||0);
+    return `
+    <div class="card" style="cursor:pointer;padding:18px 20px;margin-bottom:12px" onclick="abrirSessaoBebida(${s.id})">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div>
+          <div style="font-weight:700;font-size:15px">${s.titulo}</div>
+          <div style="color:#64748b;font-size:12px;margin-top:2px">Criada por ${s.criado_por_nome||'—'} · ${new Date(s.criado_em).toLocaleDateString('pt-BR')}</div>
+        </div>
+        ${statusBadge}
+      </div>
+      <div style="display:flex;gap:20px;margin-top:12px;flex-wrap:wrap">
+        <div><div style="font-size:11px;color:#64748b">Custo total</div><div style="font-weight:600">R$ ${parseFloat(s.custo_total).toFixed(2)}</div></div>
+        <div><div style="font-size:11px;color:#64748b">Participantes</div><div style="font-weight:600">${s.n_pagos}/${s.n_participantes} pagos</div></div>
+        ${pendente > 0 ? `<div><div style="font-size:11px;color:#64748b">Pendente</div><div style="font-weight:600;color:#ef4444">R$ ${pendente.toFixed(2)}</div></div>` : ''}
+      </div>
+      <div style="background:#e2e8f0;border-radius:99px;height:4px;margin-top:10px">
+        <div style="background:#22c55e;width:${pct}%;height:4px;border-radius:99px;transition:width .3s"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="padding:24px 28px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <h2 style="margin:0;font-size:20px">🍺 Calculadora de Bebidas</h2>
+        <button class="func-btn primary" onclick="abrirNovaSessaoBebida()">+ Nova Sessão</button>
+      </div>
+      ${sessoes.length === 0
+        ? '<div style="text-align:center;color:#64748b;padding:48px 0">Nenhuma sessão ainda. Crie a primeira!</div>'
+        : cards}
+    </div>`;
+}
+
+function abrirNovaSessaoBebida() {
+  abrirModal('Nova Sessão de Bebidas', `
+    <div style="display:grid;gap:12px">
+      <div><label class="modal-label">Título da sessão</label>
+        <input class="modal-input" id="nb_titulo" placeholder="Ex: Ágape 2ª quinzena de maio" /></div>
+      <div><label class="modal-label">Custo total (R$)</label>
+        <input class="modal-input" type="number" id="nb_custo" min="0" step="0.01" placeholder="0,00" /></div>
+      <div class="sb-msg" id="nbMsg"></div>
+    </div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Criar',    cls: 'primary', action: 'salvarNovaSessaoBebida()' },
+  ]);
+  setTimeout(() => document.getElementById('nb_titulo')?.focus(), 100);
+}
+
+async function salvarNovaSessaoBebida() {
+  const titulo = document.getElementById('nb_titulo')?.value.trim();
+  const custo  = parseFloat(document.getElementById('nb_custo')?.value||0);
+  if (!titulo) { document.getElementById('nbMsg').textContent = '⚠ Informe um título.'; return; }
+  if (!custo || custo <= 0) { document.getElementById('nbMsg').textContent = '⚠ Informe o custo total.'; return; }
+  try {
+    const s = await api('POST', '/bebidas/sessao', {
+      titulo,
+      custo_total: custo,
+    });
+    fecharModal();
+    await abrirSessaoBebida(s.id);
+  } catch(e) { document.getElementById('nbMsg').textContent = '⚠ ' + e.message; }
+}
+
+async function abrirSessaoBebida(sessaoId) {
+  mostrarView('bebidasView');
+  const el = document.getElementById('bebidasView');
+  el.innerHTML = '<div style="padding:32px;text-align:center;color:#64748b">Carregando sessão…</div>';
+  let data, irmaos = [];
+  try {
+    data   = await api('GET', `/bebidas/sessao/${sessaoId}`);
+    irmaos = await api('GET', `/irmaos?loja_id=${state.usuario.loja_id}`);
+  } catch(e) { el.innerHTML = `<div style="padding:32px;color:#ef4444">Erro: ${e.message}</div>`; return; }
+  el.innerHTML = _renderSessaoBebida(data, irmaos);
+}
+
+function _renderSessaoBebida(data, irmaos) {
+  const { sessao, participantes } = data;
+  const partIds = new Set(participantes.map(p => p.irmao_id));
+  const isAberta = sessao.status === 'aberta';
+
+  const listaPart = participantes.map(p => {
+    const vf = parseFloat(p.valor_final||0);
+    const vc = parseFloat(p.credito_aplicado||0);
+    const pixInfo = p.chave_pix
+      ? `<div style="font-size:11px;color:#0284c7;margin-top:2px">PIX: ${p.chave_pix}</div>` : '';
+    const pagoBadge = p.pago
+      ? `<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">✓ Pago</span>`
+      : (vf > 0 ? `<span style="color:#ef4444;font-weight:700">R$ ${vf.toFixed(2)}</span>` : '<span style="color:#64748b;font-size:12px">—</span>');
+    const creditoInfo = vc > 0
+      ? `<div style="font-size:11px;color:#7c3aed">Crédito usado: R$ ${vc.toFixed(2)}</div>` : '';
+    const btnPagar = isAberta && !p.pago && vf > 0
+      ? `<button class="func-btn primary" style="padding:4px 12px;font-size:12px" onclick="pagarBebida(${sessao.id},${p.irmao_id})">Pagar</button>` : '';
+    const btnDesfazer = isAberta && p.pago
+      ? `<button class="func-btn neutral" style="padding:4px 12px;font-size:12px" onclick="desfazerPagBebida(${sessao.id},${p.irmao_id})">Desfazer</button>` : '';
+    return `
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color)">
+        <div style="flex:1">
+          <div style="font-weight:600">${p.nome}</div>
+          ${creditoInfo}${pixInfo}
+        </div>
+        <div style="text-align:right">${pagoBadge}</div>
+        <div style="display:flex;gap:6px">${btnPagar}${btnDesfazer}</div>
+      </div>`;
+  }).join('');
+
+  const todosIrmaos = irmaos.map(ir => {
+    const checked = partIds.has(ir.id) ? 'checked' : '';
+    const disabled = !isAberta ? 'disabled' : '';
+    return `
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:${isAberta?'pointer':'default'}">
+        <input type="checkbox" ${checked} ${disabled}
+          onchange="toggleBebedor(${sessao.id},${ir.id})"
+          style="width:16px;height:16px" />
+        ${ir.nome}
+        ${ir.chave_pix ? `<span style="font-size:11px;color:#0284c7">(PIX: ${ir.chave_pix})</span>` : ''}
+      </label>`;
+  }).join('');
+
+  const pixCriador = sessao.chave_pix
+    ? `<div style="margin-top:12px;padding:12px;background:var(--bg-secondary);border-radius:8px;font-size:13px">
+        <div style="font-weight:600;margin-bottom:4px">PIX do Responsável</div>
+        <div style="color:#0284c7;word-break:break-all">${sessao.chave_pix}</div>
+        <div style="color:#64748b;font-size:11px">${sessao.criado_por_nome}</div>
+       </div>` : '';
+
+  const btnRecalcular = isAberta
+    ? `<button class="func-btn primary" onclick="recalcularECobrar(${sessao.id})">⟳ Recalcular Rateio</button>` : '';
+  const btnEditarCusto = isAberta
+    ? `<button class="func-btn neutral" onclick="editarCustoBebida(${sessao.id})">✏ Editar Custo</button>` : '';
+
+  const totalPago    = participantes.filter(p=>p.pago).reduce((a,p)=>a+parseFloat(p.valor_final||0),0);
+  const totalPendente= participantes.filter(p=>!p.pago).reduce((a,p)=>a+parseFloat(p.valor_final||0),0);
+
+  return `
+    <div style="padding:24px 28px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+        <button class="func-btn neutral" onclick="renderBebidasView()" style="padding:6px 14px">← Voltar</button>
+        <h2 style="margin:0;font-size:18px;flex:1">${sessao.titulo}</h2>
+        ${isAberta ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:12px">Aberta</span>'
+                   : '<span style="background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:99px;font-size:12px">Fechada</span>'}
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px">
+        <div class="card" style="padding:14px;text-align:center">
+          <div style="font-size:11px;color:#64748b">Custo Total</div>
+          <div style="font-size:20px;font-weight:700">R$ ${parseFloat(sessao.custo_total).toFixed(2)}</div>
+        </div>
+        <div class="card" style="padding:14px;text-align:center">
+          <div style="font-size:11px;color:#64748b">Pago</div>
+          <div style="font-size:20px;font-weight:700;color:#22c55e">R$ ${totalPago.toFixed(2)}</div>
+        </div>
+        <div class="card" style="padding:14px;text-align:center">
+          <div style="font-size:11px;color:#64748b">Pendente</div>
+          <div style="font-size:20px;font-weight:700;color:#ef4444">R$ ${totalPendente.toFixed(2)}</div>
+        </div>
+      </div>
+
+      ${pixCriador}
+
+      <div class="card" style="padding:16px 20px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div style="font-weight:700">Participantes (${participantes.length})</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">${btnEditarCusto}${btnRecalcular}</div>
+        </div>
+        ${participantes.length === 0
+          ? '<div style="color:#64748b;font-size:13px">Nenhum participante ainda. Selecione os irmãos abaixo.</div>'
+          : listaPart}
+      </div>
+
+      ${isAberta ? `
+      <div class="card" style="padding:16px 20px">
+        <div style="font-weight:700;margin-bottom:10px">Selecionar participantes</div>
+        <div style="max-height:260px;overflow-y:auto">${todosIrmaos}</div>
+      </div>` : ''}
+    </div>`;
+}
+
+async function toggleBebedor(sessaoId, irmaoId) {
+  try {
+    await api('POST', `/bebidas/sessao/${sessaoId}/participante/${irmaoId}`);
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function recalcularECobrar(sessaoId) {
+  try {
+    await api('POST', `/bebidas/sessao/${sessaoId}/recalcular`);
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { alert('Erro ao recalcular: ' + e.message); }
+}
+
+async function pagarBebida(sessaoId, irmaoId) {
+  try {
+    await api('POST', `/bebidas/sessao/${sessaoId}/participante/${irmaoId}/pagar`);
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { alert('Erro ao confirmar pagamento: ' + e.message); }
+}
+
+async function desfazerPagBebida(sessaoId, irmaoId) {
+  if (!confirm('Desfazer este pagamento?')) return;
+  try {
+    await api('DELETE', `/bebidas/sessao/${sessaoId}/participante/${irmaoId}/pagar`);
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { alert('Erro ao desfazer: ' + e.message); }
+}
+
+function editarCustoBebida(sessaoId) {
+  abrirModal('Editar Custo Total', `
+    <div style="display:grid;gap:12px">
+      <div><label class="modal-label">Novo custo total (R$)</label>
+        <input class="modal-input" type="number" id="ec_custo" min="0" step="0.01" placeholder="0,00" /></div>
+      <div class="sb-msg" id="ecMsg"></div>
+    </div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar',   cls: 'primary', action: `_salvarCustoBebida(${sessaoId})` },
+  ]);
+  setTimeout(() => document.getElementById('ec_custo')?.focus(), 100);
+}
+
+async function _salvarCustoBebida(sessaoId) {
+  const custo = parseFloat(document.getElementById('ec_custo')?.value||0);
+  if (!custo || custo <= 0) { document.getElementById('ecMsg').textContent = '⚠ Informe um valor válido.'; return; }
+  try {
+    await api('PUT', `/bebidas/sessao/${sessaoId}/custo`, { custo_total: custo });
+    fecharModal();
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { document.getElementById('ecMsg').textContent = '⚠ ' + e.message; }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

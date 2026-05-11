@@ -54,6 +54,11 @@ from backend_services.core_transaction_services import (
     DomainError,
     PermissionDenied,
 )
+from backend_services.bebidas_service import BebidasService
+
+
+def get_bebidas_service(db=Depends(get_database)) -> BebidasService:
+    return BebidasService(db)
 
 
 def _ensure_schema(db) -> None:
@@ -675,6 +680,47 @@ def _ensure_schema(db) -> None:
         "CREATE INDEX IF NOT EXISTS idx_lancamentos_data ON lancamentos_financeiros(data_lancamento)",
         "CREATE INDEX IF NOT EXISTS idx_contas_fin_loja ON contas_financeiras(loja_id)",
         "CREATE INDEX IF NOT EXISTS idx_contas_fin_venc ON contas_financeiras(vencimento)",
+        # ── 039: irmaos.chave_pix ──────────────────────────────────────────────
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS chave_pix VARCHAR(200)",
+        # ── 040: Calculadora de Bebidas ────────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS bebidas_sessao (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            agape_id INT,
+            titulo VARCHAR(200) NOT NULL,
+            custo_total NUMERIC(10,2) NOT NULL DEFAULT 0,
+            status VARCHAR(20) NOT NULL DEFAULT 'aberta',
+            criado_por INT REFERENCES irmaos(id) ON DELETE SET NULL,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ)""",
+        """CREATE TABLE IF NOT EXISTS bebidas_participantes (
+            id SERIAL PRIMARY KEY,
+            sessao_id INT NOT NULL REFERENCES bebidas_sessao(id) ON DELETE CASCADE,
+            irmao_id INT NOT NULL REFERENCES irmaos(id) ON DELETE CASCADE,
+            valor_base NUMERIC(10,2),
+            credito_aplicado NUMERIC(10,2) NOT NULL DEFAULT 0,
+            valor_final NUMERIC(10,2),
+            pago BOOLEAN NOT NULL DEFAULT FALSE,
+            pago_em TIMESTAMPTZ,
+            pago_por INT REFERENCES irmaos(id) ON DELETE SET NULL,
+            UNIQUE (sessao_id, irmao_id))""",
+        """CREATE TABLE IF NOT EXISTS bebidas_saldos (
+            loja_id INT NOT NULL,
+            irmao_id INT NOT NULL REFERENCES irmaos(id) ON DELETE CASCADE,
+            saldo NUMERIC(10,2) NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (loja_id, irmao_id))""",
+        """CREATE TABLE IF NOT EXISTS bebidas_lancamentos (
+            id SERIAL PRIMARY KEY,
+            loja_id INT NOT NULL,
+            sessao_id INT REFERENCES bebidas_sessao(id) ON DELETE SET NULL,
+            irmao_id INT NOT NULL REFERENCES irmaos(id) ON DELETE CASCADE,
+            tipo VARCHAR(20) NOT NULL,
+            valor NUMERIC(10,2) NOT NULL,
+            descricao TEXT,
+            criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        "CREATE INDEX IF NOT EXISTS idx_bebidas_sessao_loja ON bebidas_sessao(loja_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bebidas_part_sessao ON bebidas_participantes(sessao_id)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -1698,6 +1744,7 @@ class CreateIrmaoInput(BaseModel):
     grau: int = 1
     status: str = "ativo"
     data_elevacao: Optional[str] = None
+    chave_pix: Optional[str] = None
 
 
 class SetMensalidadeInput(BaseModel):
@@ -3074,12 +3121,12 @@ def atualizar_irmao(
         tx.execute(
             """UPDATE irmaos SET nome=%s, telefone=%s, cim=%s, potencia=%s,
                data_nascimento=%s, nome_esposa=%s, data_nascimento_esposa=%s,
-               cargo_loja=%s, grau=%s, status=%s, data_elevacao=%s
+               cargo_loja=%s, grau=%s, status=%s, data_elevacao=%s, chave_pix=%s
                WHERE id=%s""",
             (payload.nome, payload.telefone, payload.cim, payload.potencia,
              payload.data_nascimento, payload.nome_esposa, payload.data_nascimento_esposa,
              payload.cargo_loja or None, payload.grau, payload.status,
-             payload.data_elevacao or None, irmao_id),
+             payload.data_elevacao or None, payload.chave_pix or None, irmao_id),
         )
         if payload.filhos:
             tx.execute("DELETE FROM irmaos_filhos WHERE irmao_id=%s", (irmao_id,))
@@ -4519,3 +4566,170 @@ def salvar_orcamento(payload: OrcamentoInput, actor=Depends(get_current_actor), 
             [loja_id, payload.categoria, payload.mes_ano, payload.valor_orcado],
         )
     return {"status": "ok"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  CALCULADORA DE BEBIDAS
+# ═══════════════════════════════════════════════════════════
+
+class BebidaSessaoInput(BaseModel):
+    titulo: str
+    custo_total: Decimal
+    agape_id: Optional[int] = None
+
+class BebidaCustoInput(BaseModel):
+    custo_total: Decimal
+
+class BebidaPixInput(BaseModel):
+    chave_pix: Optional[str] = None
+
+@app.post("/bebidas/sessao", status_code=201)
+def criar_sessao_bebida(
+    payload: BebidaSessaoInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+    db=Depends(get_database),
+):
+    loja_id = actor.loja_id
+    if not loja_id:
+        raise HTTPException(422, "Usuário sem loja vinculada")
+    with db.transaction() as tx:
+        irmao = tx.fetch_one(
+            "SELECT id FROM irmaos WHERE usuario_id=%s AND loja_id=%s AND deleted_at IS NULL",
+            [actor.user_id, loja_id],
+        )
+    criado_por = irmao["id"] if irmao else None
+    sid = svc.criar_sessao(loja_id, payload.titulo, payload.custo_total,
+                           criado_por, payload.agape_id)
+    return {"id": sid}
+
+@app.get("/bebidas/sessao")
+def listar_sessoes_bebida(
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    loja_id = actor.loja_id
+    if not loja_id:
+        return []
+    return svc.listar_sessoes(loja_id)
+
+@app.get("/bebidas/sessao/{sessao_id}")
+def get_sessao_bebida(
+    sessao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    loja_id = actor.loja_id or 0
+    data = svc.get_sessao(sessao_id, loja_id)
+    if not data:
+        raise HTTPException(404, "Sessão não encontrada")
+    return data
+
+@app.put("/bebidas/sessao/{sessao_id}/custo")
+def atualizar_custo_bebida(
+    sessao_id: int,
+    payload: BebidaCustoInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    svc.atualizar_custo(sessao_id, actor.loja_id or 0, payload.custo_total)
+    return {"ok": True}
+
+@app.delete("/bebidas/sessao/{sessao_id}", status_code=204)
+def excluir_sessao_bebida(
+    sessao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    svc.excluir_sessao(sessao_id, actor.loja_id or 0)
+
+@app.post("/bebidas/sessao/{sessao_id}/participante/{irmao_id}")
+def toggle_participante_bebida(
+    sessao_id: int,
+    irmao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    adicionado = svc.toggle_participante(sessao_id, irmao_id, actor.loja_id or 0)
+    return {"adicionado": adicionado}
+
+@app.post("/bebidas/sessao/{sessao_id}/recalcular")
+def recalcular_bebida(
+    sessao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    return svc.recalcular(sessao_id, actor.loja_id or 0)
+
+@app.post("/bebidas/sessao/{sessao_id}/participante/{irmao_id}/pagar")
+def confirmar_pagamento_bebida(
+    sessao_id: int,
+    irmao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+    db=Depends(get_database),
+):
+    loja_id = actor.loja_id or 0
+    with db.transaction() as tx:
+        irmao = tx.fetch_one(
+            "SELECT id FROM irmaos WHERE usuario_id=%s AND loja_id=%s AND deleted_at IS NULL",
+            [actor.user_id, loja_id],
+        )
+    pago_por = irmao["id"] if irmao else 0
+    try:
+        return svc.confirmar_pagamento(sessao_id, irmao_id, pago_por, loja_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.delete("/bebidas/sessao/{sessao_id}/participante/{irmao_id}/pagar", status_code=200)
+def desfazer_pagamento_bebida(
+    sessao_id: int,
+    irmao_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    try:
+        svc.desfazer_pagamento(sessao_id, irmao_id, actor.loja_id or 0)
+        return {"ok": True}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.get("/bebidas/saldo")
+def get_saldo_bebida(
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+    db=Depends(get_database),
+):
+    loja_id = actor.loja_id or 0
+    with db.transaction() as tx:
+        irmao = tx.fetch_one(
+            "SELECT id FROM irmaos WHERE usuario_id=%s AND loja_id=%s AND deleted_at IS NULL",
+            [actor.user_id, loja_id],
+        )
+    if not irmao:
+        return {"saldo": 0.0, "historico": []}
+    return svc.get_saldo(loja_id, irmao["id"])
+
+@app.put("/irmaos/{irmao_id}/pix")
+def atualizar_pix(
+    irmao_id: int,
+    payload: BebidaPixInput,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    with db.transaction() as tx:
+        irmao = tx.fetch_one(
+            "SELECT id, usuario_id, loja_id FROM irmaos WHERE id=%s AND deleted_at IS NULL",
+            [irmao_id],
+        )
+        if not irmao:
+            raise HTTPException(404, "Irmão não encontrado")
+        eh_dono = irmao["usuario_id"] == actor.user_id
+        eh_admin = actor.cargo in ("admin_principal", "veneravel_mestre")
+        if not eh_dono and not eh_admin:
+            raise HTTPException(403, "Sem permissão")
+        tx.execute(
+            "UPDATE irmaos SET chave_pix=%s, updated_at=NOW() WHERE id=%s",
+            [payload.chave_pix, irmao_id],
+        )
+    return {"ok": True}
