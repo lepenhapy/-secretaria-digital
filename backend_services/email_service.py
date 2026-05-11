@@ -1,34 +1,50 @@
+import base64
+import json
 import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+import urllib.error
+import urllib.request
 
 
 class EmailService:
     def __init__(self):
-        self.host     = os.getenv('SMTP_HOST', 'smtp.gmail.com')
-        self.port     = int(os.getenv('SMTP_PORT', '587'))
-        self.user     = os.getenv('SMTP_USER', '')
-        self.password = os.getenv('SMTP_PASS', '')
-        self.from_    = os.getenv('SMTP_FROM', self.user)
+        self.api_key  = os.getenv('BREVO_API_KEY', '')
+        self.sender_email = os.getenv('SMTP_FROM_EMAIL', os.getenv('SMTP_USER', ''))
+        self.sender_name  = os.getenv('SMTP_FROM_NAME', 'Secretaria Digital')
         self.base_url = os.getenv('BASE_URL', 'http://127.0.0.1:8001')
 
     def configurado(self) -> bool:
-        return bool(self.user and self.password)
+        return bool(self.api_key and self.sender_email)
+
+    def _send(self, to_email: str, to_name: str, subject: str,
+              html: str, text: str = '', attachments: list | None = None) -> None:
+        payload: dict = {
+            'sender': {'name': self.sender_name, 'email': self.sender_email},
+            'to':     [{'email': to_email, 'name': to_name}],
+            'subject': subject,
+            'htmlContent': html,
+        }
+        if text:
+            payload['textContent'] = text
+        if attachments:
+            payload['attachment'] = attachments
+
+        data = json.dumps(payload).encode()
+        req  = urllib.request.Request(
+            'https://api.brevo.com/v3/smtp/email',
+            data=data,
+            headers={
+                'api-key':      self.api_key,
+                'Content-Type': 'application/json',
+            },
+        )
+        try:
+            urllib.request.urlopen(req, timeout=15)
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode()
+            raise RuntimeError(f'Brevo API error {exc.code}: {body}') from exc
 
     def send_confirmation(self, to_email: str, nome: str, token: str) -> None:
         link = f"{self.base_url}/confirmar/{token}"
-
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = 'Secretaria Digital — Confirme seu e-mail'
-        msg['From']    = self.from_
-        msg['To']      = to_email
-
-        text = (
-            f"Olá {nome},\n\n"
-            f"Confirme sua conta clicando no link:\n{link}\n\n"
-            "Se não foi você, ignore este e-mail."
-        )
         html = f"""
         <html><body style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px">
           <div style="text-align:center;margin-bottom:24px">
@@ -54,53 +70,36 @@ class EmailService:
           </p>
         </body></html>
         """
-
-        msg.attach(MIMEText(text, 'plain', 'utf-8'))
-        msg.attach(MIMEText(html, 'html', 'utf-8'))
-
-        with smtplib.SMTP(self.host, self.port, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            if self.user and self.password:
-                server.login(self.user, self.password)
-            server.sendmail(self.from_, to_email, msg.as_string())
+        text = f"Olá {nome},\n\nConfirme sua conta:\n{link}\n\nSe não foi você, ignore."
+        self._send(to_email, nome, 'Secretaria Digital — Confirme seu e-mail', html, text)
 
     def send_simple(self, to_email: str, nome: str, subject: str, body_text: str) -> None:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From']    = self.from_
-        msg['To']      = to_email
-        html = (f'<html><body style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px">'
-                f'<p>Olá, <strong>{nome}</strong>.</p>'
-                f'<div style="background:#f8fafc;border-left:4px solid #2563eb;padding:16px;'
-                f'border-radius:4px;white-space:pre-wrap">{body_text}</div>'
-                f'<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>'
-                f'<p style="color:#94a3b8;font-size:11px">Secretaria Digital</p>'
-                f'</body></html>')
-        msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
-        msg.attach(MIMEText(html, 'html', 'utf-8'))
-        with smtplib.SMTP(self.host, self.port, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            if self.user and self.password:
-                server.login(self.user, self.password)
-            server.sendmail(self.from_, to_email, msg.as_string())
+        html = (
+            f'<html><body style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px">'
+            f'<p>Olá, <strong>{nome}</strong>.</p>'
+            f'<div style="background:#f8fafc;border-left:4px solid #2563eb;padding:16px;'
+            f'border-radius:4px;white-space:pre-wrap">{body_text}</div>'
+            f'<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>'
+            f'<p style="color:#94a3b8;font-size:11px">Secretaria Digital</p>'
+            f'</body></html>'
+        )
+        self._send(to_email, nome, subject, html, body_text)
 
     def send_boleto(self, to_email: str, nome_irmao: str,
                     pdf_bytes: bytes, filename: str, caption: str) -> None:
-        from email.mime.application import MIMEApplication
-        msg = MIMEMultipart()
-        msg['Subject'] = 'Seu boleto — Secretaria Digital'
-        msg['From']    = self.from_
-        msg['To']      = to_email
-        texto = f"Olá {nome_irmao},\n\n{caption}\n\nSecretaria Digital"
-        msg.attach(MIMEText(texto, 'plain', 'utf-8'))
-        pdf_part = MIMEApplication(pdf_bytes, _subtype='pdf')
-        pdf_part.add_header('Content-Disposition', 'attachment', filename=filename)
-        msg.attach(pdf_part)
-        with smtplib.SMTP(self.host, self.port, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            if self.user and self.password:
-                server.login(self.user, self.password)
-            server.sendmail(self.from_, to_email, msg.as_string())
+        html = (
+            f'<html><body style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px">'
+            f'<p>Olá, <strong>{nome_irmao}</strong>.</p>'
+            f'<p>{caption}</p>'
+            f'<p>O boleto está em anexo neste e-mail.</p>'
+            f'<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>'
+            f'<p style="color:#94a3b8;font-size:11px">Secretaria Digital</p>'
+            f'</body></html>'
+        )
+        text = f'Olá {nome_irmao},\n\n{caption}\n\nSecretaria Digital'
+        attachment = {
+            'content': base64.b64encode(pdf_bytes).decode(),
+            'name':    filename,
+        }
+        self._send(to_email, nome_irmao, 'Seu boleto — Secretaria Digital',
+                   html, text, [attachment])
