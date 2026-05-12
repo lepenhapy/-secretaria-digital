@@ -724,8 +724,9 @@ def _ensure_schema(db) -> None:
         # ── 041: convidados externos na calculadora de bebidas ─────────────────
         "ALTER TABLE bebidas_participantes ADD COLUMN IF NOT EXISTS externo_nome VARCHAR(150)",
         "ALTER TABLE bebidas_participantes ADD COLUMN IF NOT EXISTS externo_telefone VARCHAR(30)",
-        # ── 042: irmao_id nullable em bebidas_participantes (suporte a externos) ─
+        # ── 042: irmao_id nullable em bebidas_participantes e lancamentos ────────
         "ALTER TABLE bebidas_participantes ALTER COLUMN irmao_id DROP NOT NULL",
+        "ALTER TABLE bebidas_lancamentos ALTER COLUMN irmao_id DROP NOT NULL",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
