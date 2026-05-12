@@ -6502,6 +6502,7 @@ function _renderSessaoBebida(data, irmaos) {
     ? `<button class="func-btn primary" onclick="recalcularECobrar(${sessao.id})">⟳ Recalcular Rateio</button>` : '';
   const btnEditarCusto = isAberta
     ? `<button class="func-btn neutral" onclick="editarCustoBebida(${sessao.id})">✏ Editar Custo</button>` : '';
+  const btnExcluir = `<button class="func-btn danger" onclick="excluirSessaoBebida(${sessao.id})">🗑 Excluir Sessão</button>`;
 
   const totalPago    = participantes.filter(p=>p.pago).reduce((a,p)=>a+parseFloat(p.valor_final||0),0);
   const totalPendente= participantes.filter(p=>!p.pago).reduce((a,p)=>a+parseFloat(p.valor_final||0),0);
@@ -6513,6 +6514,7 @@ function _renderSessaoBebida(data, irmaos) {
         <h2 style="margin:0;font-size:18px;flex:1">${sessao.titulo}</h2>
         ${isAberta ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:12px">Aberta</span>'
                    : '<span style="background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:99px;font-size:12px">Fechada</span>'}
+        ${btnExcluir}
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px">
@@ -6577,6 +6579,14 @@ async function desfazerPagBebida(sessaoId, irmaoId) {
     await api('DELETE', `/bebidas/sessao/${sessaoId}/participante/${irmaoId}/pagar`);
     await abrirSessaoBebida(sessaoId);
   } catch(e) { alert('Erro ao desfazer: ' + e.message); }
+}
+
+async function excluirSessaoBebida(sessaoId) {
+  if (!confirm('Excluir esta sessão? Todos os participantes e pagamentos serão removidos.')) return;
+  try {
+    await api('DELETE', `/bebidas/sessao/${sessaoId}`);
+    renderBebidasView();
+  } catch(e) { alert('Erro ao excluir: ' + e.message); }
 }
 
 function editarCustoBebida(sessaoId) {
