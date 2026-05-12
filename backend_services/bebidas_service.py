@@ -242,9 +242,11 @@ class BebidasService:
                 raise ValueError("Participante não encontrado")
             if p['pago']:
                 raise ValueError("Já marcado como pago")
+            if p['valor_final'] is None:
+                raise ValueError("Recalcule o rateio antes de confirmar o pagamento")
 
             valor   = Decimal(str(p['valor_final']))
-            credito = Decimal(str(p['credito_aplicado']))
+            credito = Decimal(str(p['credito_aplicado'] or 0))
 
             tx.execute(
                 """UPDATE bebidas_participantes
@@ -275,7 +277,7 @@ class BebidasService:
             if not p or not p['pago']:
                 raise ValueError("Pagamento não encontrado")
 
-            credito = Decimal(str(p['credito_aplicado']))
+            credito = Decimal(str(p['credito_aplicado'] or 0))
             tx.execute(
                 "UPDATE bebidas_participantes SET pago=FALSE, pago_em=NULL, pago_por=NULL WHERE sessao_id=%s AND irmao_id=%s",
                 [sessao_id, irmao_id],

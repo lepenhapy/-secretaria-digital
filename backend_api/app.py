@@ -4675,10 +4675,10 @@ def confirmar_pagamento_bebida(
             "SELECT id FROM irmaos WHERE usuario_id=%s AND loja_id=%s AND deleted_at IS NULL",
             [actor.user_id, loja_id],
         )
-    pago_por = irmao["id"] if irmao else 0
+    pago_por = irmao["id"] if irmao else None
     try:
         return svc.confirmar_pagamento(sessao_id, irmao_id, pago_por, loja_id)
-    except ValueError as e:
+    except Exception as e:
         raise HTTPException(400, str(e))
 
 @app.delete("/bebidas/sessao/{sessao_id}/participante/{irmao_id}/pagar", status_code=200)
