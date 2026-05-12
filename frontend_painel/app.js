@@ -1347,6 +1347,8 @@ async function editarIrmao(id) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group" style="grid-column:1/-1"><label>Nome completo</label>
         <input class="modal-input" id="ei_nome" value="${(ir.nome||'').replace(/"/g,'&quot;')}" /></div>
+      <div class="form-group" style="grid-column:1/-1"><label>Chave PIX</label>
+        <input class="modal-input" id="ei_pix" value="${(ir.chave_pix||'').replace(/"/g,'&quot;')}" placeholder="CPF, e-mail, telefone ou chave aleatória" /></div>
       <div class="form-group"><label>CIM</label>
         <input class="modal-input" id="ei_cim" value="${ir.cim||''}" /></div>
       <div class="form-group"><label>Potência</label>
@@ -1374,8 +1376,6 @@ async function editarIrmao(id) {
         <select class="modal-input" id="ei_status">
           ${STATUS_IRMAO.map(s => `<option value="${s.v}" ${(ir.status||'ativo')===s.v?'selected':''}>${s.label}</option>`).join('')}
         </select></div>
-      <div class="form-group" style="grid-column:1/-1"><label>Chave PIX</label>
-        <input class="modal-input" id="ei_pix" value="${(ir.chave_pix||'').replace(/"/g,'&quot;')}" placeholder="CPF, e-mail, telefone ou chave aleatória" /></div>
       <div class="form-group" style="grid-column:1/-1"><label>Filhos (nome / data — um por linha)</label>
         <textarea class="modal-input" id="ei_filhos" rows="3">${filhosStr}</textarea></div>
     </div>
@@ -6507,18 +6507,27 @@ function _renderSessaoBebida(data, irmaos) {
     <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-color)">
       <div style="font-weight:600;margin-bottom:8px;font-size:13px">+ Adicionar convidado externo</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input class="sb-input" id="ext_nome_${sessao.id}" placeholder="Nome" style="flex:2;min-width:140px" />
-        <input class="sb-input" id="ext_tel_${sessao.id}" placeholder="Telefone (opcional)" style="flex:1;min-width:120px" />
+        <input class="modal-input" id="ext_nome_${sessao.id}" placeholder="Nome" style="flex:2;min-width:140px;color:var(--text-primary)" />
+        <input class="modal-input" id="ext_tel_${sessao.id}" placeholder="Telefone (opcional)" style="flex:1;min-width:120px;color:var(--text-primary)" />
         <button class="func-btn primary" style="white-space:nowrap" onclick="adicionarExterno(${sessao.id})">Adicionar</button>
       </div>
     </div>` : '';
 
+  const isCriador = sessao.criado_por === state.usuario?.irmao_id;
   const pixCriador = sessao.chave_pix
-    ? `<div style="margin-top:12px;padding:12px;background:var(--bg-secondary);border-radius:8px;font-size:13px">
-        <div style="font-weight:600;margin-bottom:4px">PIX do Responsável</div>
-        <div style="color:#0284c7;word-break:break-all">${sessao.chave_pix}</div>
-        <div style="color:#64748b;font-size:11px">${sessao.criado_por_nome}</div>
-       </div>` : '';
+    ? `<div style="margin-top:12px;padding:12px;background:var(--bg-secondary);border-radius:8px;font-size:13px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1">
+          <div style="font-weight:600;margin-bottom:2px">PIX do Responsável (${sessao.criado_por_nome})</div>
+          <div style="color:#0284c7;word-break:break-all">${sessao.chave_pix}</div>
+        </div>
+        ${isCriador ? `<button class="func-btn neutral" style="font-size:12px;padding:4px 10px" onclick="definirMeuPix(${sessao.id})">✏ Editar PIX</button>` : ''}
+       </div>`
+    : (isCriador
+        ? `<div style="margin-top:12px;padding:10px 14px;background:#fef3c7;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;color:#92400e">⚠ Você ainda não cadastrou sua chave PIX. Os participantes precisam saber para onde pagar.</div>
+            <button class="func-btn primary" style="font-size:12px;padding:4px 12px;white-space:nowrap" onclick="definirMeuPix(${sessao.id})">Definir meu PIX</button>
+           </div>`
+        : '');
 
   const btnRecalcular = isAberta
     ? `<button class="func-btn primary" onclick="recalcularECobrar(${sessao.id})">⟳ Recalcular Rateio</button>` : '';
@@ -6573,6 +6582,33 @@ function _renderSessaoBebida(data, irmaos) {
         ${formConvidado}
       </div>` : ''}
     </div>`;
+}
+
+function definirMeuPix(sessaoId) {
+  const irmaoId = state.usuario?.irmao_id;
+  if (!irmaoId) { alert('Seu perfil de irmão não está vinculado. Edite seu cadastro primeiro.'); return; }
+  abrirModal('Minha Chave PIX', `
+    <div style="display:grid;gap:12px">
+      <div style="color:#64748b;font-size:13px">Esta chave aparecerá para os participantes saberem para onde transferir.</div>
+      <div><label class="modal-label">Chave PIX</label>
+        <input class="modal-input" id="pix_chave" placeholder="CPF, e-mail, telefone ou chave aleatória" /></div>
+      <div class="sb-msg" id="pixMsg"></div>
+    </div>
+  `, [
+    { label: 'Cancelar', cls: 'neutral', action: 'fecharModal()' },
+    { label: 'Salvar',   cls: 'primary', action: `_salvarMeuPix(${irmaoId},${sessaoId})` },
+  ]);
+  setTimeout(() => document.getElementById('pix_chave')?.focus(), 100);
+}
+
+async function _salvarMeuPix(irmaoId, sessaoId) {
+  const chave = document.getElementById('pix_chave')?.value.trim();
+  if (!chave) { document.getElementById('pixMsg').textContent = '⚠ Informe a chave PIX.'; return; }
+  try {
+    await api('PUT', `/irmaos/${irmaoId}/pix`, { chave_pix: chave });
+    fecharModal();
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { document.getElementById('pixMsg').textContent = '⚠ ' + e.message; }
 }
 
 async function adicionarExterno(sessaoId) {
