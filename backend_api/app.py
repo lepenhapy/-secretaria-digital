@@ -721,6 +721,9 @@ def _ensure_schema(db) -> None:
             criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
         "CREATE INDEX IF NOT EXISTS idx_bebidas_sessao_loja ON bebidas_sessao(loja_id)",
         "CREATE INDEX IF NOT EXISTS idx_bebidas_part_sessao ON bebidas_participantes(sessao_id)",
+        # ── 041: convidados externos na calculadora de bebidas ─────────────────
+        "ALTER TABLE bebidas_participantes ADD COLUMN IF NOT EXISTS externo_nome VARCHAR(150)",
+        "ALTER TABLE bebidas_participantes ADD COLUMN IF NOT EXISTS externo_telefone VARCHAR(30)",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
@@ -4692,6 +4695,63 @@ def desfazer_pagamento_bebida(
         svc.desfazer_pagamento(sessao_id, irmao_id, actor.loja_id or 0)
         return {"ok": True}
     except ValueError as e:
+        raise HTTPException(400, str(e))
+
+class BebidaExternoInput(BaseModel):
+    nome: str
+    telefone: Optional[str] = None
+
+@app.post("/bebidas/sessao/{sessao_id}/externo", status_code=201)
+def adicionar_externo_bebida(
+    sessao_id: int,
+    payload: BebidaExternoInput,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    part_id = svc.adicionar_externo(sessao_id, payload.nome, payload.telefone)
+    return {"part_id": part_id}
+
+@app.delete("/bebidas/sessao/{sessao_id}/externo/{part_id}", status_code=200)
+def remover_externo_bebida(
+    sessao_id: int,
+    part_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    svc.remover_externo(sessao_id, part_id)
+    return {"ok": True}
+
+@app.post("/bebidas/sessao/{sessao_id}/externo/{part_id}/pagar")
+def confirmar_pagamento_ext_bebida(
+    sessao_id: int,
+    part_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+    db=Depends(get_database),
+):
+    loja_id = actor.loja_id or 0
+    with db.transaction() as tx:
+        irmao = tx.fetch_one(
+            "SELECT id FROM irmaos WHERE usuario_id=%s AND loja_id=%s AND deleted_at IS NULL",
+            [actor.user_id, loja_id],
+        )
+    pago_por = irmao["id"] if irmao else None
+    try:
+        return svc.confirmar_pagamento_ext(part_id, pago_por, loja_id)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+@app.delete("/bebidas/sessao/{sessao_id}/externo/{part_id}/pagar", status_code=200)
+def desfazer_pagamento_ext_bebida(
+    sessao_id: int,
+    part_id: int,
+    actor: Actor = Depends(get_current_actor),
+    svc: BebidasService = Depends(get_bebidas_service),
+):
+    try:
+        svc.desfazer_pagamento_ext(part_id, actor.loja_id or 0)
+        return {"ok": True}
+    except Exception as e:
         raise HTTPException(400, str(e))
 
 @app.get("/bebidas/saldo")

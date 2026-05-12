@@ -33,12 +33,10 @@ class BebidasService:
 
     def calcular_rateio(self, custo_total: Decimal, participantes: list) -> list:
         """
-        participantes: [{'irmao_id': int, 'saldo': Decimal}]
-        Retorna: [{'irmao_id', 'valor_base', 'credito_aplicado', 'valor_final'}]
+        participantes: [{'part_id': int, 'irmao_id': int|None, 'saldo': Decimal}]
+        Retorna: [{'part_id', 'irmao_id', 'valor_base', 'credito_aplicado', 'valor_final'}]
 
-        Regra: divisão igualitária. Créditos reduzem a cota do titular;
-        o valor não coberto é redistribuído entre quem ainda deve,
-        garantindo que a soma feche exatamente com custo_total.
+        Externos (irmao_id=None) nunca têm crédito, pagam a cota base cheia.
         """
         n = len(participantes)
         if n == 0:
@@ -51,14 +49,15 @@ class BebidasService:
         total_credito = Decimal('0')
 
         for p in participantes:
-            saldo  = Decimal(str(p['saldo']))
+            saldo   = Decimal(str(p['saldo'])) if p.get('irmao_id') else Decimal('0')
             credito = min(max(saldo, Decimal('0')), base)
             total_credito += credito
             resultado.append({
-                'irmao_id':        p['irmao_id'],
-                'valor_base':      base,
+                'part_id':          p['part_id'],
+                'irmao_id':         p.get('irmao_id'),
+                'valor_base':       base,
                 'credito_aplicado': credito,
-                'valor_final':     base - credito,
+                'valor_final':      base - credito,
             })
 
         # Redistribuir gap de créditos entre quem ainda deve
@@ -78,7 +77,6 @@ class BebidasService:
         total_calc = sum(r['valor_final'] for r in resultado)
         diff = self._q(custo) - total_calc
         if diff != 0:
-            # Ajusta o último devedor
             for r in reversed(resultado):
                 if r['valor_final'] > 0:
                     r['valor_final'] += diff
@@ -131,14 +129,19 @@ class BebidasService:
             if not s:
                 return None
             participantes = tx.fetch_all(
-                """SELECT bp.*, i.nome, i.telefone, i.whatsapp, i.chave_pix,
-                          COALESCE(bs.saldo, 0) AS saldo_atual
+                """SELECT bp.id AS part_id, bp.irmao_id, bp.pago, bp.pago_em,
+                          bp.valor_base, bp.credito_aplicado, bp.valor_final,
+                          COALESCE(i.nome, bp.externo_nome)         AS nome,
+                          COALESCE(i.telefone, bp.externo_telefone) AS telefone,
+                          i.whatsapp, i.chave_pix,
+                          COALESCE(bs.saldo, 0)                     AS saldo_atual,
+                          (bp.irmao_id IS NULL)                     AS is_externo
                    FROM bebidas_participantes bp
-                   JOIN irmaos i ON i.id = bp.irmao_id
+                   LEFT JOIN irmaos i ON i.id = bp.irmao_id
                    LEFT JOIN bebidas_saldos bs
                      ON bs.irmao_id = bp.irmao_id AND bs.loja_id = %s
                    WHERE bp.sessao_id=%s
-                   ORDER BY i.nome""",
+                   ORDER BY nome""",
                 [loja_id, sessao_id],
             )
             return {'sessao': dict(s), 'participantes': [dict(p) for p in participantes]}
@@ -157,10 +160,10 @@ class BebidasService:
                 [sessao_id, loja_id],
             )
 
-    # ── Participantes ──────────────────────────────────────────────────────
+    # ── Participantes (irmãos) ─────────────────────────────────────────────
 
     def toggle_participante(self, sessao_id: int, irmao_id: int, loja_id: int) -> bool:
-        """Adiciona ou remove participante. Retorna True se adicionado."""
+        """Adiciona ou remove irmão da sessão. Retorna True se adicionado."""
         with self.db.transaction() as tx:
             existe = tx.fetch_one(
                 "SELECT id FROM bebidas_participantes WHERE sessao_id=%s AND irmao_id=%s",
@@ -179,6 +182,26 @@ class BebidasService:
                 )
                 return True
 
+    # ── Participantes externos ─────────────────────────────────────────────
+
+    def adicionar_externo(self, sessao_id: int, nome: str,
+                          telefone: Optional[str]) -> int:
+        with self.db.transaction() as tx:
+            row = tx.fetch_one(
+                """INSERT INTO bebidas_participantes (sessao_id, externo_nome, externo_telefone)
+                   VALUES (%s, %s, %s) RETURNING id""",
+                [sessao_id, nome, telefone],
+            )
+            return row['id']
+
+    def remover_externo(self, sessao_id: int, part_id: int):
+        with self.db.transaction() as tx:
+            tx.execute(
+                """DELETE FROM bebidas_participantes
+                   WHERE id=%s AND sessao_id=%s AND irmao_id IS NULL""",
+                [part_id, sessao_id],
+            )
+
     # ── Recálculo ──────────────────────────────────────────────────────────
 
     def recalcular(self, sessao_id: int, loja_id: int) -> list:
@@ -191,7 +214,8 @@ class BebidasService:
                 raise ValueError("Sessão não encontrada")
 
             participantes = tx.fetch_all(
-                """SELECT bp.irmao_id, bp.pago, bp.valor_final AS valor_pago_atual,
+                """SELECT bp.id AS part_id, bp.irmao_id, bp.pago,
+                          bp.valor_final AS valor_pago_atual,
                           COALESCE(bs.saldo, 0) AS saldo
                    FROM bebidas_participantes bp
                    LEFT JOIN bebidas_saldos bs
@@ -200,40 +224,41 @@ class BebidasService:
                 [loja_id, sessao_id],
             )
 
-            # Separa pagos e não pagos
             nao_pagos = [p for p in participantes if not p['pago']]
             pagos     = [p for p in participantes if p['pago']]
 
-            # Custo já coberto pelos que pagaram
-            total_pago = sum(Decimal(str(p['valor_pago_atual'])) for p in pagos)
+            total_pago = sum(
+                Decimal(str(p['valor_pago_atual'] or 0)) for p in pagos
+            )
             custo_restante = Decimal(str(s['custo_total'])) - total_pago
 
             if not nao_pagos:
-                return []  # Todos já pagaram
+                return []
 
             rateio = self.calcular_rateio(
                 custo_restante,
-                [{'irmao_id': p['irmao_id'], 'saldo': p['saldo']} for p in nao_pagos],
+                [{'part_id': p['part_id'], 'irmao_id': p['irmao_id'],
+                  'saldo': p['saldo']} for p in nao_pagos],
             )
 
             for r in rateio:
                 tx.execute(
                     """UPDATE bebidas_participantes
                        SET valor_base=%s, credito_aplicado=%s, valor_final=%s
-                       WHERE sessao_id=%s AND irmao_id=%s AND pago=FALSE""",
+                       WHERE id=%s AND pago=FALSE""",
                     [r['valor_base'], r['credito_aplicado'], r['valor_final'],
-                     sessao_id, r['irmao_id']],
+                     r['part_id']],
                 )
 
             return rateio
 
-    # ── Pagamento ──────────────────────────────────────────────────────────
+    # ── Pagamento (irmão) ──────────────────────────────────────────────────
 
     def confirmar_pagamento(self, sessao_id: int, irmao_id: int,
-                             pago_por: int, loja_id: int) -> dict:
+                             pago_por: Optional[int], loja_id: int) -> dict:
         with self.db.transaction() as tx:
             p = tx.fetch_one(
-                """SELECT bp.pago, bp.valor_final, bp.credito_aplicado
+                """SELECT bp.id AS part_id, bp.pago, bp.valor_final, bp.credito_aplicado
                    FROM bebidas_participantes bp
                    WHERE bp.sessao_id=%s AND bp.irmao_id=%s""",
                 [sessao_id, irmao_id],
@@ -245,45 +270,82 @@ class BebidasService:
             if p['valor_final'] is None:
                 raise ValueError("Recalcule o rateio antes de confirmar o pagamento")
 
-            valor   = Decimal(str(p['valor_final']))
-            credito = Decimal(str(p['credito_aplicado'] or 0))
-
-            tx.execute(
-                """UPDATE bebidas_participantes
-                   SET pago=TRUE, pago_em=NOW(), pago_por=%s
-                   WHERE sessao_id=%s AND irmao_id=%s""",
-                [pago_por, sessao_id, irmao_id],
-            )
-
-            # Consumir crédito usado
-            if credito > 0:
-                self._ajustar_saldo(tx, loja_id, irmao_id, -credito)
-
-            # Ledger
-            tx.execute(
-                """INSERT INTO bebidas_lancamentos
-                     (loja_id, sessao_id, irmao_id, tipo, valor, descricao)
-                   VALUES (%s, %s, %s, 'pagamento', %s, 'Pagamento confirmado')""",
-                [loja_id, sessao_id, irmao_id, valor],
-            )
-            return {'ok': True, 'valor': float(valor)}
+            return self._confirmar_part(tx, p, pago_por, loja_id, sessao_id,
+                                        irmao_id_para_credito=irmao_id)
 
     def desfazer_pagamento(self, sessao_id: int, irmao_id: int, loja_id: int):
         with self.db.transaction() as tx:
             p = tx.fetch_one(
-                "SELECT pago, credito_aplicado FROM bebidas_participantes WHERE sessao_id=%s AND irmao_id=%s",
+                "SELECT id AS part_id, pago, credito_aplicado FROM bebidas_participantes WHERE sessao_id=%s AND irmao_id=%s",
                 [sessao_id, irmao_id],
             )
             if not p or not p['pago']:
                 raise ValueError("Pagamento não encontrado")
+            self._desfazer_part(tx, p, loja_id, irmao_id_para_credito=irmao_id)
 
-            credito = Decimal(str(p['credito_aplicado'] or 0))
-            tx.execute(
-                "UPDATE bebidas_participantes SET pago=FALSE, pago_em=NULL, pago_por=NULL WHERE sessao_id=%s AND irmao_id=%s",
-                [sessao_id, irmao_id],
+    # ── Pagamento (externo — usa part_id) ─────────────────────────────────
+
+    def confirmar_pagamento_ext(self, part_id: int,
+                                pago_por: Optional[int], loja_id: int) -> dict:
+        with self.db.transaction() as tx:
+            p = tx.fetch_one(
+                """SELECT id AS part_id, sessao_id, pago, valor_final, credito_aplicado
+                   FROM bebidas_participantes WHERE id=%s AND irmao_id IS NULL""",
+                [part_id],
             )
-            if credito > 0:
-                self._ajustar_saldo(tx, loja_id, irmao_id, credito)  # devolver crédito
+            if not p:
+                raise ValueError("Convidado não encontrado")
+            if p['pago']:
+                raise ValueError("Já marcado como pago")
+            if p['valor_final'] is None:
+                raise ValueError("Recalcule o rateio antes de confirmar o pagamento")
+
+            return self._confirmar_part(tx, p, pago_por, loja_id,
+                                        p['sessao_id'], irmao_id_para_credito=None)
+
+    def desfazer_pagamento_ext(self, part_id: int, loja_id: int):
+        with self.db.transaction() as tx:
+            p = tx.fetch_one(
+                "SELECT id AS part_id, pago, credito_aplicado FROM bebidas_participantes WHERE id=%s AND irmao_id IS NULL",
+                [part_id],
+            )
+            if not p or not p['pago']:
+                raise ValueError("Pagamento não encontrado")
+            self._desfazer_part(tx, p, loja_id, irmao_id_para_credito=None)
+
+    # ── Helpers internos ───────────────────────────────────────────────────
+
+    def _confirmar_part(self, tx, p, pago_por, loja_id, sessao_id,
+                        irmao_id_para_credito):
+        valor   = Decimal(str(p['valor_final']))
+        credito = Decimal(str(p['credito_aplicado'] or 0))
+
+        tx.execute(
+            """UPDATE bebidas_participantes
+               SET pago=TRUE, pago_em=NOW(), pago_por=%s
+               WHERE id=%s""",
+            [pago_por, p['part_id']],
+        )
+
+        if credito > 0 and irmao_id_para_credito:
+            self._ajustar_saldo(tx, loja_id, irmao_id_para_credito, -credito)
+
+        tx.execute(
+            """INSERT INTO bebidas_lancamentos
+                 (loja_id, sessao_id, irmao_id, tipo, valor, descricao)
+               VALUES (%s, %s, %s, 'pagamento', %s, 'Pagamento confirmado')""",
+            [loja_id, sessao_id, irmao_id_para_credito, valor],
+        )
+        return {'ok': True, 'valor': float(valor)}
+
+    def _desfazer_part(self, tx, p, loja_id, irmao_id_para_credito):
+        credito = Decimal(str(p['credito_aplicado'] or 0))
+        tx.execute(
+            "UPDATE bebidas_participantes SET pago=FALSE, pago_em=NULL, pago_por=NULL WHERE id=%s",
+            [p['part_id']],
+        )
+        if credito > 0 and irmao_id_para_credito:
+            self._ajustar_saldo(tx, loja_id, irmao_id_para_credito, credito)
 
     # ── Saldos ─────────────────────────────────────────────────────────────
 

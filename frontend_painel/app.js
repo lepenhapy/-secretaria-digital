@@ -6450,36 +6450,48 @@ async function abrirSessaoBebida(sessaoId) {
 
 function _renderSessaoBebida(data, irmaos) {
   const { sessao, participantes } = data;
-  const partIds = new Set(participantes.map(p => p.irmao_id));
+  const partIrmaoIds = new Set(participantes.filter(p=>!p.is_externo).map(p => p.irmao_id));
   const isAberta = sessao.status === 'aberta';
 
   const listaPart = participantes.map(p => {
     const vf = parseFloat(p.valor_final||0);
     const vc = parseFloat(p.credito_aplicado||0);
-    const pixInfo = p.chave_pix
+    const extBadge = p.is_externo
+      ? `<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:99px;font-size:10px;margin-left:6px">convidado</span>` : '';
+    const telInfo = p.is_externo && p.telefone
+      ? `<div style="font-size:11px;color:#64748b;margin-top:2px">${p.telefone}</div>` : '';
+    const pixInfo = !p.is_externo && p.chave_pix
       ? `<div style="font-size:11px;color:#0284c7;margin-top:2px">PIX: ${p.chave_pix}</div>` : '';
     const pagoBadge = p.pago
       ? `<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">✓ Pago</span>`
       : (vf > 0 ? `<span style="color:#ef4444;font-weight:700">R$ ${vf.toFixed(2)}</span>` : '<span style="color:#64748b;font-size:12px">—</span>');
     const creditoInfo = vc > 0
-      ? `<div style="font-size:11px;color:#7c3aed">Crédito usado: R$ ${vc.toFixed(2)}</div>` : '';
+      ? `<div style="font-size:11px;color:#7c3aed">Crédito: R$ ${vc.toFixed(2)}</div>` : '';
     const btnPagar = isAberta && !p.pago && vf > 0
-      ? `<button class="func-btn primary" style="padding:4px 12px;font-size:12px" onclick="pagarBebida(${sessao.id},${p.irmao_id})">Pagar</button>` : '';
+      ? (p.is_externo
+          ? `<button class="func-btn primary" style="padding:4px 12px;font-size:12px" onclick="pagarBebidaExt(${sessao.id},${p.part_id})">Pagar</button>`
+          : `<button class="func-btn primary" style="padding:4px 12px;font-size:12px" onclick="pagarBebida(${sessao.id},${p.irmao_id})">Pagar</button>`)
+      : '';
     const btnDesfazer = isAberta && p.pago
-      ? `<button class="func-btn neutral" style="padding:4px 12px;font-size:12px" onclick="desfazerPagBebida(${sessao.id},${p.irmao_id})">Desfazer</button>` : '';
+      ? (p.is_externo
+          ? `<button class="func-btn neutral" style="padding:4px 12px;font-size:12px" onclick="desfazerPagBebidaExt(${sessao.id},${p.part_id})">Desfazer</button>`
+          : `<button class="func-btn neutral" style="padding:4px 12px;font-size:12px" onclick="desfazerPagBebida(${sessao.id},${p.irmao_id})">Desfazer</button>`)
+      : '';
+    const btnRemoverExt = isAberta && p.is_externo && !p.pago
+      ? `<button class="func-btn danger" style="padding:4px 8px;font-size:12px" onclick="removerExterno(${sessao.id},${p.part_id})" title="Remover convidado">✕</button>` : '';
     return `
       <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color)">
         <div style="flex:1">
-          <div style="font-weight:600">${p.nome}</div>
-          ${creditoInfo}${pixInfo}
+          <div style="font-weight:600">${p.nome}${extBadge}</div>
+          ${creditoInfo}${telInfo}${pixInfo}
         </div>
         <div style="text-align:right">${pagoBadge}</div>
-        <div style="display:flex;gap:6px">${btnPagar}${btnDesfazer}</div>
+        <div style="display:flex;gap:6px">${btnPagar}${btnDesfazer}${btnRemoverExt}</div>
       </div>`;
   }).join('');
 
   const todosIrmaos = irmaos.map(ir => {
-    const checked = partIds.has(ir.id) ? 'checked' : '';
+    const checked = partIrmaoIds.has(ir.id) ? 'checked' : '';
     const disabled = !isAberta ? 'disabled' : '';
     return `
       <label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:${isAberta?'pointer':'default'}">
@@ -6490,6 +6502,16 @@ function _renderSessaoBebida(data, irmaos) {
         ${ir.chave_pix ? `<span style="font-size:11px;color:#0284c7">(PIX: ${ir.chave_pix})</span>` : ''}
       </label>`;
   }).join('');
+
+  const formConvidado = isAberta ? `
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-color)">
+      <div style="font-weight:600;margin-bottom:8px;font-size:13px">+ Adicionar convidado externo</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input class="sb-input" id="ext_nome_${sessao.id}" placeholder="Nome" style="flex:2;min-width:140px" />
+        <input class="sb-input" id="ext_tel_${sessao.id}" placeholder="Telefone (opcional)" style="flex:1;min-width:120px" />
+        <button class="func-btn primary" style="white-space:nowrap" onclick="adicionarExterno(${sessao.id})">Adicionar</button>
+      </div>
+    </div>` : '';
 
   const pixCriador = sessao.chave_pix
     ? `<div style="margin-top:12px;padding:12px;background:var(--bg-secondary);border-radius:8px;font-size:13px">
@@ -6546,10 +6568,44 @@ function _renderSessaoBebida(data, irmaos) {
 
       ${isAberta ? `
       <div class="card" style="padding:16px 20px">
-        <div style="font-weight:700;margin-bottom:10px">Selecionar participantes</div>
+        <div style="font-weight:700;margin-bottom:10px">Selecionar irmãos da loja</div>
         <div style="max-height:260px;overflow-y:auto">${todosIrmaos}</div>
+        ${formConvidado}
       </div>` : ''}
     </div>`;
+}
+
+async function adicionarExterno(sessaoId) {
+  const nome = document.getElementById(`ext_nome_${sessaoId}`)?.value.trim();
+  if (!nome) { alert('Informe o nome do convidado.'); return; }
+  const tel  = document.getElementById(`ext_tel_${sessaoId}`)?.value.trim() || null;
+  try {
+    await api('POST', `/bebidas/sessao/${sessaoId}/externo`, { nome, telefone: tel });
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function removerExterno(sessaoId, partId) {
+  if (!confirm('Remover este convidado da sessão?')) return;
+  try {
+    await api('DELETE', `/bebidas/sessao/${sessaoId}/externo/${partId}`);
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function pagarBebidaExt(sessaoId, partId) {
+  try {
+    await api('POST', `/bebidas/sessao/${sessaoId}/externo/${partId}/pagar`);
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { alert('Erro ao confirmar pagamento: ' + e.message); }
+}
+
+async function desfazerPagBebidaExt(sessaoId, partId) {
+  if (!confirm('Desfazer este pagamento?')) return;
+  try {
+    await api('DELETE', `/bebidas/sessao/${sessaoId}/externo/${partId}/pagar`);
+    await abrirSessaoBebida(sessaoId);
+  } catch(e) { alert('Erro ao desfazer: ' + e.message); }
 }
 
 async function toggleBebedor(sessaoId, irmaoId) {
