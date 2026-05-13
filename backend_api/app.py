@@ -737,6 +737,30 @@ def _ensure_schema(db) -> None:
             except Exception as exc:
                 print(f"[schema] aviso ({s[:60]!r}): {exc}")
 
+        # Habilita RLS em todas as tabelas da aplicação.
+        # O backend usa o usuário postgres (superusuário) que ignora RLS,
+        # então isso só bloqueia acesso direto pela REST pública do Supabase.
+        _rls_tables = [
+            'lojas','usuarios','cargos','irmaos','irmaos_filhos',
+            'regras_mensalidade','pagamentos_mensalidade',
+            'contratos','contratos_arquivos','mensagens',
+            'casos','casos_arquivos','compras','compras_arquivos',
+            'reembolsos','reembolsos_arquivos','repositorio_arquivos',
+            'comissoes','comissoes_membros','boletos_processados',
+            'tarefas','tarefas_comentarios','inventario_itens',
+            'auditoria_eventos','presencas',
+            'bebidas_sessao','bebidas_participantes',
+            'bebidas_saldos','bebidas_lancamentos',
+            'contas_bancarias','lancamentos_financeiros',
+            'contas_financeiras','investimentos_dividas',
+            'orcamento_categorias',
+        ]
+        for t in _rls_tables:
+            try:
+                conn.execute(f"ALTER TABLE {t} ENABLE ROW LEVEL SECURITY")
+            except Exception:
+                pass  # tabela ainda não existe neste ambiente
+
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
