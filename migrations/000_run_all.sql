@@ -23,3 +23,4 @@
 \i 023_novos_cargos_e_repositorio_bytea.sql
 \i 024_categorias_inventario_inbox.sql
 \i 025_irmaos_cargo_loja.sql
+\i 026_irmaos_email.sql

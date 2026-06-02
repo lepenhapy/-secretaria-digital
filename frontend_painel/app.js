@@ -974,16 +974,9 @@ function tagMensalidade(cat) {
 }
 
 function _cardActionsIrmao(ir, isAdminOverride) {
-  const cargo = state.usuario?.cargo;
-  const isAdmin = isAdminOverride ?? ['admin_principal','veneravel_mestre'].includes(cargo);
-  const isSecretary = cargo === 'secretario';
-  const isOwn = ir.usuario_id && ir.usuario_id == state.usuario?.user_id;
-  const podeEditar = isAdmin || isSecretary || isOwn;
-  const podeExcluir = isAdmin;
-  if (!podeEditar) return '';
   return `<div class="irmao-card-actions" onclick="event.stopPropagation()">
     <button class="func-btn neutral" onclick="editarIrmao(${ir.id})">✏ Editar</button>
-    ${podeExcluir ? `<button class="func-btn danger" onclick="excluirIrmao(${ir.id})">🗑</button>` : ''}
+    <button class="func-btn danger" onclick="excluirIrmao(${ir.id})">🗑</button>
   </div>`;
 }
 
@@ -1086,6 +1079,10 @@ async function renderIrmaoView() {
         <div class="form-group">
           <label class="form-label">WhatsApp / Celular</label>
           <input class="form-input" id="fi_tel" type="text" placeholder="(DDD) 9xxxx-xxxx" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">E-mail</label>
+          <input class="form-input" id="fi_email" type="email" placeholder="email@exemplo.com" />
         </div>
         <div class="form-group">
           <label class="form-label">Data de Nascimento</label>
@@ -1293,6 +1290,7 @@ async function salvarIrmao() {
   const dados = {
     loja_id:              parseInt(document.getElementById('fi_loja').value) || state.usuario?.loja_id || 1,
     nome:                 document.getElementById('fi_nome').value.trim(),
+    email:                document.getElementById('fi_email')?.value.trim() || null,
     cim:                  document.getElementById('fi_cim').value.trim() || null,
     potencia:             document.getElementById('fi_potencia').value.trim() || null,
     telefone:             document.getElementById('fi_tel').value.trim() || null,
@@ -1310,7 +1308,7 @@ async function salvarIrmao() {
     res.className = 'modal-result ok';
     res.textContent = 'Irmão cadastrado com sucesso!';
     // Limpa o formulário
-    ['fi_nome','fi_cim','fi_tel','fi_nasc','fi_esposa','fi_filhos']
+    ['fi_nome','fi_cim','fi_tel','fi_email','fi_nasc','fi_esposa','fi_filhos']
       .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
     const potenciaInput = document.getElementById('fi_potencia');
     if (potenciaInput) potenciaInput.value = 'GOE';
@@ -1347,6 +1345,8 @@ async function editarIrmao(id) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group" style="grid-column:1/-1"><label>Nome completo</label>
         <input class="modal-input" id="ei_nome" value="${(ir.nome||'').replace(/"/g,'&quot;')}" /></div>
+      <div class="form-group" style="grid-column:1/-1"><label>E-mail</label>
+        <input class="modal-input" type="email" id="ei_email" value="${(ir.email||'').replace(/"/g,'&quot;')}" placeholder="email@exemplo.com" /></div>
       <div class="form-group" style="grid-column:1/-1"><label>Chave PIX</label>
         <input class="modal-input" id="ei_pix" value="${(ir.chave_pix||'').replace(/"/g,'&quot;')}" placeholder="CPF, e-mail, telefone ou chave aleatória" /></div>
       <div class="form-group"><label>CIM</label>
@@ -1399,6 +1399,7 @@ async function salvarEdicaoIrmao(id) {
   const dados = {
     loja_id:           lojaId,
     nome:              document.getElementById('ei_nome').value.trim(),
+    email:             document.getElementById('ei_email')?.value.trim()||null,
     cim:               document.getElementById('ei_cim').value.trim()||null,
     potencia:          document.getElementById('ei_potencia').value||null,
     telefone:          document.getElementById('ei_tel').value.trim()||null,
@@ -3964,8 +3965,8 @@ async function carregarUsuarios() {
             onclick="vincularUsuarioLoja(${u.id})">🏛 Vincular Loja</button>` : ''}
           ${!u.ativo ? `<button class="func-btn primary" style="font-size:12px;padding:4px 12px"
             onclick="ativarUsuario(${u.id})">✓ Ativar</button>` : ''}
-          <button class="func-btn danger" style="font-size:12px;padding:4px 12px"
-            onclick="excluirUsuario(${u.id},'${(u.nome||'').replace(/'/g,'')}')">🗑 Excluir</button>
+          ${(isAdmin || u.id === state.usuario?.user_id) ? `<button class="func-btn danger" style="font-size:12px;padding:4px 12px"
+            onclick="excluirUsuario(${u.id},'${(u.nome||'').replace(/'/g,'')}')">🗑 Excluir</button>` : ''}
         </div>
       </div>`;
     }).join('');

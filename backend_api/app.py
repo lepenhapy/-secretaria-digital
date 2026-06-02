@@ -1742,6 +1742,8 @@ def excluir_usuario(
     actor: Actor = Depends(get_current_actor),
     db=Depends(get_database),
 ):
+    if actor.user_id != usuario_id and actor.cargo != "admin_principal":
+        raise HTTPException(status_code=403, detail="Você só pode excluir sua própria conta.")
     with db.transaction() as tx:
         tx.execute(
             "UPDATE usuarios SET deleted_at=NOW(), ativo=FALSE WHERE id=%s",
@@ -1762,6 +1764,7 @@ class CreateIrmaoInput(BaseModel):
     loja_id: int
     nome: str
     telefone: Optional[str] = None
+    email: Optional[str] = None
     cim: Optional[str] = None
     potencia: Optional[str] = None
     data_nascimento: Optional[str] = None
@@ -1797,6 +1800,7 @@ def criar_irmao(
             loja_id=payload.loja_id,
             nome=payload.nome,
             telefone=payload.telefone,
+            email=payload.email,
             cim=payload.cim,
             potencia=payload.potencia,
             data_nascimento=payload.data_nascimento,
@@ -3149,11 +3153,12 @@ def atualizar_irmao(
 ):
     with db.transaction() as tx:
         tx.execute(
-            """UPDATE irmaos SET nome=%s, telefone=%s, cim=%s, potencia=%s,
+            """UPDATE irmaos SET nome=%s, telefone=%s, email=%s, cim=%s, potencia=%s,
                data_nascimento=%s, nome_esposa=%s, data_nascimento_esposa=%s,
-               cargo_loja=%s, grau=%s, status=%s, data_elevacao=%s, chave_pix=%s
+               cargo_loja=%s, grau=%s, status=%s, data_elevacao=%s, chave_pix=%s,
+               updated_at=now()
                WHERE id=%s""",
-            (payload.nome, payload.telefone, payload.cim, payload.potencia,
+            (payload.nome, payload.telefone, payload.email or None, payload.cim, payload.potencia,
              payload.data_nascimento, payload.nome_esposa, payload.data_nascimento_esposa,
              payload.cargo_loja or None, payload.grau, payload.status,
              payload.data_elevacao or None, payload.chave_pix or None, irmao_id),

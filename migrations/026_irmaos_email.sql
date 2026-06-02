@@ -1,0 +1,4 @@
+BEGIN;
+ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+CREATE INDEX IF NOT EXISTS idx_irmaos_email ON irmaos(email) WHERE deleted_at IS NULL;
+COMMIT;

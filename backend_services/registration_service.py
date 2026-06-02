@@ -28,15 +28,33 @@ class RegistrationService:
 
             email_ok = self.email.configurado()
             token = secrets.token_urlsafe(32) if email_ok else None
-            tx.execute(
+            row = tx.fetch_one(
                 """
                 insert into usuarios
                   (nome, email, senha_hash, cargo_id, ativo, email_confirmado, confirmacao_token)
                 values (%s, %s, %s, %s, %s, %s, %s)
+                returning id
                 """,
                 [nome, email, AuthService.hash_password(senha), cargo["id"],
                  not email_ok, not email_ok, token],
             )
+            usuario_id = row["id"]
+
+            # Se já existe irmão com esse e-mail, vincula automaticamente
+            irmao = tx.fetch_one(
+                "select id, loja_id from irmaos where email = %s and deleted_at is null limit 1",
+                [email],
+            )
+            if irmao:
+                tx.execute(
+                    "update irmaos set usuario_id = %s, updated_at = now() where id = %s",
+                    [usuario_id, irmao["id"]],
+                )
+                if irmao["loja_id"]:
+                    tx.execute(
+                        "update usuarios set loja_id = %s, updated_at = now() where id = %s",
+                        [irmao["loja_id"], usuario_id],
+                    )
 
         if email_ok:
             self.email.send_confirmation(to_email=email, nome=nome, token=token)
@@ -79,22 +97,40 @@ class RegistrationService:
         grau: int = 1,
         status: str = "ativo",
         data_elevacao: Optional[str] = None,
+        email: Optional[str] = None,
     ) -> int:
         with self.db.transaction() as tx:
+            # Se informou e-mail, verifica se já existe usuário com esse e-mail para vincular
+            usuario_id = None
+            if email:
+                u = tx.fetch_one(
+                    "select id, loja_id from usuarios where email = %s and deleted_at is null limit 1",
+                    [email],
+                )
+                if u:
+                    usuario_id = u["id"]
+
             row = tx.fetch_one(
                 """
                 insert into irmaos
                   (loja_id, nome, telefone, cim, potencia,
                    data_nascimento, nome_esposa, data_nascimento_esposa,
-                   grau, status, data_elevacao)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   grau, status, data_elevacao, email, usuario_id)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 returning id
                 """,
                 [loja_id, nome, telefone, cim, potencia,
                  data_nascimento or None, nome_esposa, data_nascimento_esposa or None,
-                 grau, status, data_elevacao or None],
+                 grau, status, data_elevacao or None, email or None, usuario_id],
             )
             irmao_id = row["id"]
+
+            # Se vinculou a um usuário existente, garante que ele esteja na loja correta
+            if usuario_id and not u.get("loja_id"):
+                tx.execute(
+                    "update usuarios set loja_id = %s, updated_at = now() where id = %s",
+                    [loja_id, usuario_id],
+                )
 
             for filho in (filhos or []):
                 tx.execute(
@@ -121,7 +157,7 @@ class RegistrationService:
                 select i.id, i.nome, i.telefone, i.cim, i.potencia,
                        i.data_nascimento, i.nome_esposa, i.data_nascimento_esposa,
                        i.status, i.grau, i.data_elevacao, i.created_at, i.cargo_loja,
-                       i.usuario_id, i.whatsapp, i.chave_pix,
+                       i.usuario_id, i.whatsapp, i.chave_pix, i.email,
                        rm.categoria as mensalidade_categoria,
                        rm.valor     as mensalidade_valor
                 from irmaos i
