@@ -730,6 +730,11 @@ def _ensure_schema(db) -> None:
         # ── 042: irmao_id nullable em bebidas_participantes e lancamentos ────────
         "ALTER TABLE bebidas_participantes ALTER COLUMN irmao_id DROP NOT NULL",
         "ALTER TABLE bebidas_lancamentos ALTER COLUMN irmao_id DROP NOT NULL",
+        # ── 043: e-mail em irmaos + recuperação de senha ──────────────────────
+        "ALTER TABLE irmaos ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
+        "CREATE INDEX IF NOT EXISTS idx_irmaos_email ON irmaos(email) WHERE deleted_at IS NULL",
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token TEXT",
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_expiry TIMESTAMP",
     ]
     # Uma única conexão com autocommit — muito mais rápido do que uma transação por statement
     import psycopg as _psycopg
