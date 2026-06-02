@@ -518,11 +518,11 @@ function abrirRecuperarSenha() {
   document.getElementById('rec_email').value = '';
   const msg = document.getElementById('recuperarMsg');
   msg.style.display = 'none'; msg.textContent = '';
-  document.getElementById('modalRecuperarOverlay').style.display = 'flex';
+  document.getElementById('modalRecuperarOverlay').classList.add('open');
 }
 
 function fecharRecuperar() {
-  document.getElementById('modalRecuperarOverlay').style.display = 'none';
+  document.getElementById('modalRecuperarOverlay').classList.remove('open');
 }
 
 async function enviarRecuperacao() {
@@ -551,12 +551,11 @@ function abrirRedefinir(token) {
   document.getElementById('redefinirStep2').style.display = 'none';
   const msg = document.getElementById('redefinirMsg');
   msg.style.display = 'none'; msg.textContent = '';
-  document.getElementById('modalRedefinirOverlay').style.display = 'flex';
+  document.getElementById('modalRedefinirOverlay').classList.add('open');
 }
 
 function fecharRedefinir() {
-  document.getElementById('modalRedefinirOverlay').style.display = 'none';
-  // Limpa o token da URL sem recarregar
+  document.getElementById('modalRedefinirOverlay').classList.remove('open');
   const url = new URL(window.location.href);
   url.searchParams.delete('reset');
   window.history.replaceState({}, '', url.toString());
@@ -588,7 +587,13 @@ async function confirmarRedefinicao() {
 (function() {
   const params = new URLSearchParams(window.location.search);
   const token = params.get('reset');
-  if (token) { window.addEventListener('DOMContentLoaded', () => abrirRedefinir(token)); }
+  if (!token) return;
+  // DOMContentLoaded pode já ter disparado (script está no fim do body)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => abrirRedefinir(token));
+  } else {
+    abrirRedefinir(token);
+  }
 })();
 
 function mostrarView(id) {
@@ -4081,7 +4086,8 @@ async function excluirUsuario(id, nome) {
 async function criarPerfilIrmao(usuarioId, nome, email, lojaId) {
   if (!confirm(`Criar perfil de irmão para "${nome}"?`)) return;
   try {
-    const r = await api('POST', '/irmaos', {
+    // criar_irmao já vincula usuario_id automaticamente via e-mail
+    await api('POST', '/irmaos', {
       loja_id: lojaId,
       nome,
       email: email || null,
@@ -4089,8 +4095,6 @@ async function criarPerfilIrmao(usuarioId, nome, email, lojaId) {
       status: 'ativo',
       filhos: [],
     });
-    // Vincula o usuário ao irmão criado
-    try { await api('PUT', `/irmaos/${r.irmao_id}/vincular-usuario`); } catch(_) {}
     alert('Perfil de irmão criado com sucesso!');
     carregarUsuarios();
   } catch(e) { alert('Erro: ' + e.message); }
