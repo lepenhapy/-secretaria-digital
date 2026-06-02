@@ -42,6 +42,7 @@
         <button class="btn-login" id="loginBtn">Entrar</button>
         <div class="sb-msg" id="loginMsg"></div>
         <button class="btn-criar-conta" id="abrirCadastroBtn">Criar conta</button>
+        <button class="btn-criar-conta" id="abrirRecuperarBtn" style="margin-top:4px;background:transparent;color:var(--muted);font-size:11px;border:none;cursor:pointer;padding:2px 0" onclick="abrirRecuperarSenha()">Esqueci minha senha</button>
       </div>
 
       <div id="blocoUsuario" style="display:none">
@@ -256,6 +257,77 @@
       </div>
       <div class="modal-footer" style="justify-content:center">
         <button class="func-btn primary" onclick="fecharCadastro()">Entendido</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de recuperação de senha -->
+<div class="modal-overlay" id="modalRecuperarOverlay" onclick="fecharRecuperar()" style="display:none">
+  <div class="modal-box" onclick="event.stopPropagation()" style="max-width:400px">
+    <div class="modal-header">
+      <div class="modal-title" id="recuperarTitle">Recuperar senha</div>
+      <button class="modal-close" onclick="fecharRecuperar()">✕</button>
+    </div>
+    <div id="recuperarStep1">
+      <div class="modal-body">
+        <div style="color:#64748b;font-size:13px;margin-bottom:12px;line-height:1.5">
+          Informe o e-mail cadastrado. Enviaremos um link para criar uma nova senha.
+        </div>
+        <div class="modal-label">E-mail</div>
+        <input class="modal-input" id="rec_email" type="email" placeholder="seu@email.com" />
+        <pre class="modal-result" id="recuperarMsg" style="display:none"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="func-btn neutral" onclick="fecharRecuperar()">Cancelar</button>
+        <button class="func-btn primary" id="recuperarBtn" onclick="enviarRecuperacao()">Enviar link</button>
+      </div>
+    </div>
+    <div id="recuperarStep2" style="display:none">
+      <div class="modal-body" style="text-align:center;padding:20px 22px">
+        <div style="font-size:32px">📧</div>
+        <div style="font-size:16px;font-weight:700;margin-top:10px">Verifique seu e-mail</div>
+        <div style="color:#64748b;margin-top:6px;font-size:13px;line-height:1.5">
+          Se o e-mail estiver cadastrado, você receberá o link em instantes.<br/>
+          O link expira em <strong>1 hora</strong>.
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content:center">
+        <button class="func-btn primary" onclick="fecharRecuperar()">Entendido</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de redefinição de senha (via link do e-mail) -->
+<div class="modal-overlay" id="modalRedefinirOverlay" style="display:none">
+  <div class="modal-box" onclick="event.stopPropagation()" style="max-width:400px">
+    <div class="modal-header">
+      <div class="modal-title">Criar nova senha</div>
+    </div>
+    <div id="redefinirStep1">
+      <div class="modal-body">
+        <div style="color:#64748b;font-size:13px;margin-bottom:12px">
+          Escolha uma nova senha para sua conta.
+        </div>
+        <div class="modal-label">Nova senha</div>
+        <input class="modal-input" id="red_senha" type="password" placeholder="Mínimo 8 caracteres" />
+        <div class="modal-label" style="margin-top:8px">Confirmar nova senha</div>
+        <input class="modal-input" id="red_confirma" type="password" placeholder="Repita a senha" />
+        <pre class="modal-result" id="redefinirMsg" style="display:none"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="func-btn primary" id="redefinirBtn" onclick="confirmarRedefinicao()">Salvar nova senha</button>
+      </div>
+    </div>
+    <div id="redefinirStep2" style="display:none">
+      <div class="modal-body" style="text-align:center;padding:20px 22px">
+        <div style="font-size:32px">✅</div>
+        <div style="font-size:16px;font-weight:700;margin-top:10px">Senha alterada!</div>
+        <div style="color:#64748b;margin-top:6px;font-size:13px">Faça login com sua nova senha.</div>
+      </div>
+      <div class="modal-footer" style="justify-content:center">
+        <button class="func-btn primary" onclick="fecharRedefinir()">Ir para login</button>
       </div>
     </div>
   </div>

@@ -1,5 +1,6 @@
 import os
 import re as _re
+import secrets
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -46,6 +47,8 @@ from backend_services.relatorios_service import RelatoriosService
 from backend_services.birthday_service import BirthdayService
 from backend_services.boleto_processor import BoletoProcessor
 from backend_services.calendar_service import CalendarService
+from backend_services.auth_service import AuthService
+from backend_services.email_service import EmailService
 from backend_services.registration_service import RegistrationService
 from backend_services.core_transaction_services import (
     Actor,
@@ -1698,6 +1701,73 @@ def confirmar_email(token: str, reg: RegistrationService = Depends(get_registrat
 
 
 # ═══════════════════════════════════════════════════════════
+#  RECUPERAÇÃO DE SENHA
+# ═══════════════════════════════════════════════════════════
+
+class RecuperarSenhaInput(BaseModel):
+    email: str
+
+
+class RedefinirSenhaInput(BaseModel):
+    token: str
+    nova_senha: str
+
+
+@app.post("/recuperar-senha", status_code=200)
+def recuperar_senha(
+    payload: RecuperarSenhaInput,
+    db=Depends(get_database),
+    email_svc: EmailService = Depends(get_email_service),
+):
+    import datetime as _dt
+    with db.transaction() as tx:
+        user = tx.fetch_one(
+            "SELECT id, nome, email FROM usuarios WHERE email=%s AND deleted_at IS NULL AND ativo=TRUE",
+            (payload.email,),
+        )
+        if not user:
+            # Retorna mesmo resultado para não enumerar e-mails
+            return {"status": "sent"}
+        token = secrets.token_urlsafe(32)
+        expiry = _dt.datetime.utcnow() + _dt.timedelta(hours=1)
+        tx.execute(
+            "UPDATE usuarios SET reset_token=%s, reset_token_expiry=%s, updated_at=now() WHERE id=%s",
+            (token, expiry, user["id"]),
+        )
+    if email_svc.configurado():
+        try:
+            email_svc.send_reset_password(to_email=user["email"], nome=user["nome"], token=token)
+        except Exception:
+            pass
+    return {"status": "sent"}
+
+
+@app.post("/redefinir-senha", status_code=200)
+def redefinir_senha(
+    payload: RedefinirSenhaInput,
+    db=Depends(get_database),
+):
+    import datetime as _dt
+    if len(payload.nova_senha) < 8:
+        raise HTTPException(status_code=400, detail="A senha deve ter ao menos 8 caracteres.")
+    with db.transaction() as tx:
+        user = tx.fetch_one(
+            """SELECT id FROM usuarios
+               WHERE reset_token=%s AND reset_token_expiry > now()
+                 AND deleted_at IS NULL""",
+            (payload.token,),
+        )
+        if not user:
+            raise HTTPException(status_code=400, detail="Link inválido ou expirado.")
+        tx.execute(
+            """UPDATE usuarios SET senha_hash=%s, reset_token=NULL,
+               reset_token_expiry=NULL, updated_at=now() WHERE id=%s""",
+            (AuthService.hash_password(payload.nova_senha), user["id"]),
+        )
+    return {"status": "updated"}
+
+
+# ═══════════════════════════════════════════════════════════
 #  GESTÃO DE USUÁRIOS (admin)
 # ═══════════════════════════════════════════════════════════
 
@@ -1714,9 +1784,11 @@ def listar_usuarios(
             cond += " AND u.loja_id=%s"; params.append(loja_id)
         return tx.fetch_all(
             f"""SELECT u.id, u.nome, u.email, u.ativo, u.email_confirmado,
-                       u.loja_id, c.nome AS cargo, u.created_at
+                       u.loja_id, c.nome AS cargo, u.created_at,
+                       i.id AS irmao_id
                 FROM usuarios u
                 JOIN cargos c ON c.id = u.cargo_id
+                LEFT JOIN irmaos i ON i.usuario_id = u.id AND i.deleted_at IS NULL
                 {cond} ORDER BY u.nome""",
             params,
         )

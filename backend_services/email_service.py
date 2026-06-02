@@ -85,6 +85,37 @@ class EmailService:
         )
         self._send(to_email, nome, subject, html, body_text)
 
+    def send_reset_password(self, to_email: str, nome: str, token: str) -> None:
+        link = f"{self.base_url}?reset={token}"
+        html = f"""
+        <html><body style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px">
+          <div style="text-align:center;margin-bottom:24px">
+            <h2 style="color:#1e293b;margin:0">Secretaria Digital</h2>
+            <p style="color:#64748b;font-size:13px;margin:4px 0">Sistema de Gestão da Loja</p>
+          </div>
+          <p>Olá, <strong>{nome}</strong>.</p>
+          <p>Recebemos um pedido de redefinição de senha para sua conta.</p>
+          <p>Clique no botão abaixo para criar uma nova senha. O link expira em <strong>1 hora</strong>.</p>
+          <div style="text-align:center;margin:28px 0">
+            <a href="{link}"
+               style="display:inline-block;padding:14px 32px;background:#dc2626;color:#fff;
+                      border-radius:8px;text-decoration:none;font-weight:bold;font-size:15px">
+              Redefinir minha senha
+            </a>
+          </div>
+          <p style="color:#64748b;font-size:12px">
+            Ou copie e cole este link no navegador:<br/>
+            <a href="{link}" style="color:#2563eb">{link}</a>
+          </p>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>
+          <p style="color:#94a3b8;font-size:11px">
+            Se não foi você que solicitou, ignore este e-mail. Sua senha não será alterada.
+          </p>
+        </body></html>
+        """
+        text = f"Olá {nome},\n\nRedefina sua senha:\n{link}\n\nO link expira em 1 hora.\nSe não foi você, ignore."
+        self._send(to_email, nome, 'Secretaria Digital — Redefinição de senha', html, text)
+
     def send_boleto(self, to_email: str, nome_irmao: str,
                     pdf_bytes: bytes, filename: str, caption: str) -> None:
         html = (

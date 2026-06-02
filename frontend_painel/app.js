@@ -508,6 +508,89 @@ async function login() {
   }
 }
 
+// ── Recuperação / redefinição de senha ────────────────────────────────────
+
+let _resetToken = null;
+
+function abrirRecuperarSenha() {
+  document.getElementById('recuperarStep1').style.display = 'block';
+  document.getElementById('recuperarStep2').style.display = 'none';
+  document.getElementById('rec_email').value = '';
+  const msg = document.getElementById('recuperarMsg');
+  msg.style.display = 'none'; msg.textContent = '';
+  document.getElementById('modalRecuperarOverlay').style.display = 'flex';
+}
+
+function fecharRecuperar() {
+  document.getElementById('modalRecuperarOverlay').style.display = 'none';
+}
+
+async function enviarRecuperacao() {
+  const email = document.getElementById('rec_email').value.trim();
+  const msg = document.getElementById('recuperarMsg');
+  const btn = document.getElementById('recuperarBtn');
+  if (!email) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Informe seu e-mail.'; return; }
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    await api('POST', '/recuperar-senha', { email });
+    document.getElementById('recuperarStep1').style.display = 'none';
+    document.getElementById('recuperarStep2').style.display = 'block';
+  } catch(e) {
+    msg.style.display='block'; msg.className='modal-result error';
+    msg.textContent = e.message || 'Erro ao enviar.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Enviar link';
+  }
+}
+
+function abrirRedefinir(token) {
+  _resetToken = token;
+  document.getElementById('red_senha').value = '';
+  document.getElementById('red_confirma').value = '';
+  document.getElementById('redefinirStep1').style.display = 'block';
+  document.getElementById('redefinirStep2').style.display = 'none';
+  const msg = document.getElementById('redefinirMsg');
+  msg.style.display = 'none'; msg.textContent = '';
+  document.getElementById('modalRedefinirOverlay').style.display = 'flex';
+}
+
+function fecharRedefinir() {
+  document.getElementById('modalRedefinirOverlay').style.display = 'none';
+  // Limpa o token da URL sem recarregar
+  const url = new URL(window.location.href);
+  url.searchParams.delete('reset');
+  window.history.replaceState({}, '', url.toString());
+  _resetToken = null;
+}
+
+async function confirmarRedefinicao() {
+  const senha = document.getElementById('red_senha').value;
+  const confirma = document.getElementById('red_confirma').value;
+  const msg = document.getElementById('redefinirMsg');
+  const btn = document.getElementById('redefinirBtn');
+  msg.style.display = 'block';
+  if (!senha || senha.length < 8) { msg.className='modal-result error'; msg.textContent='A senha deve ter ao menos 8 caracteres.'; return; }
+  if (senha !== confirma) { msg.className='modal-result error'; msg.textContent='As senhas não coincidem.'; return; }
+  btn.disabled = true; btn.textContent = 'Salvando…';
+  try {
+    await api('POST', '/redefinir-senha', { token: _resetToken, nova_senha: senha });
+    document.getElementById('redefinirStep1').style.display = 'none';
+    document.getElementById('redefinirStep2').style.display = 'block';
+  } catch(e) {
+    msg.className='modal-result error';
+    msg.textContent = e.data?.detail || e.message || 'Link inválido ou expirado.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Salvar nova senha';
+  }
+}
+
+// Detecta token de reset na URL ao carregar
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('reset');
+  if (token) { window.addEventListener('DOMContentLoaded', () => abrirRedefinir(token)); }
+})();
+
 function mostrarView(id) {
   ['preLoginView','homeView','cargoView','irmaoView','comprasView','rateioView',
    'relatoriosView','permissoesView','comissoesView','repositorioView',
@@ -3921,7 +4004,6 @@ async function aprovarReembolsoItem(id, decisao) {
 
 async function renderUsuariosView() {
   const el = document.getElementById('usuariosView');
-  const isAdmin = state.usuario?.cargo === 'admin_principal';
   el.innerHTML = `
     <div class="view-header">
       <h1>Usuários</h1>
@@ -3941,17 +4023,24 @@ async function carregarUsuarios() {
     const lojaMap = Object.fromEntries(lojas.map(l => [l.id, l]));
     const el = document.getElementById('usuariosLista');
     if (!lista.length) { el.innerHTML = '<p class="empty-msg">Nenhum usuário cadastrado.</p>'; return; }
-    el.innerHTML = lista.map(u => {
+    const semLoja = lista.filter(u => !u.loja_id);
+    const aviso = semLoja.length
+      ? `<div style="background:#fef9c3;border:1px solid #fbbf24;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px">
+           <strong>⚠ ${semLoja.length} usuário(s) sem loja vinculada</strong> — use o botão "Vincular Loja" para associá-los e então criar o perfil de irmão.
+         </div>`
+      : '';
+    el.innerHTML = aviso + lista.map(u => {
       const lj = lojaMap[u.loja_id];
       const lojaInfo = lj
         ? `<span style="background:var(--border);border-radius:10px;padding:1px 8px;font-size:11px">
              🏛 ${lj.nome}${lj.numero?' nº'+lj.numero:''}</span>`
         : `<span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:1px 8px;font-size:11px">
              ⚠ Sem loja</span>`;
+      const semIrmao = !u.irmao_id;
       return `
-      <div class="rateio-item" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div class="rateio-item" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px${semIrmao&&u.loja_id?';border-left:3px solid #f59e0b':''}" >
         <div>
-          <div style="font-weight:700;font-size:14px">${u.nome}</div>
+          <div style="font-weight:700;font-size:14px">${u.nome}${semIrmao?' <span style="font-size:11px;color:#b45309;background:#fef3c7;border-radius:8px;padding:1px 7px">sem perfil de irmão</span>':''}</div>
           <div style="font-size:12px;color:var(--muted);margin-top:2px">${u.email} · ${(u.cargo||'').replace(/_/g,' ')}</div>
           <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">
             ${lojaInfo}
@@ -3961,8 +4050,11 @@ async function carregarUsuarios() {
           </div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${isAdmin ? `<button class="func-btn neutral" style="font-size:12px;padding:4px 12px"
+          ${isAdmin && !u.loja_id ? `<button class="func-btn neutral" style="font-size:12px;padding:4px 12px"
             onclick="vincularUsuarioLoja(${u.id})">🏛 Vincular Loja</button>` : ''}
+          ${isAdmin && semIrmao && u.loja_id ? `<button class="func-btn primary" style="font-size:12px;padding:4px 12px"
+            onclick="criarPerfilIrmao(${u.id},'${(u.nome||'').replace(/'/g,'')}','${(u.email||'').replace(/'/g,'')}',${u.loja_id})">👤 Criar perfil</button>` : ''}
+          ${isAdmin && !u.loja_id ? '' : ''}
           ${!u.ativo ? `<button class="func-btn primary" style="font-size:12px;padding:4px 12px"
             onclick="ativarUsuario(${u.id})">✓ Ativar</button>` : ''}
           ${(isAdmin || u.id === state.usuario?.user_id) ? `<button class="func-btn danger" style="font-size:12px;padding:4px 12px"
@@ -3984,6 +4076,24 @@ async function excluirUsuario(id, nome) {
   if (!confirm(`Excluir o usuário "${nome}"? Esta ação não pode ser desfeita.`)) return;
   try { await api('DELETE', `/usuarios/${id}`); carregarUsuarios(); }
   catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function criarPerfilIrmao(usuarioId, nome, email, lojaId) {
+  if (!confirm(`Criar perfil de irmão para "${nome}"?`)) return;
+  try {
+    const r = await api('POST', '/irmaos', {
+      loja_id: lojaId,
+      nome,
+      email: email || null,
+      grau: 1,
+      status: 'ativo',
+      filhos: [],
+    });
+    // Vincula o usuário ao irmão criado
+    try { await api('PUT', `/irmaos/${r.irmao_id}/vincular-usuario`); } catch(_) {}
+    alert('Perfil de irmão criado com sucesso!');
+    carregarUsuarios();
+  } catch(e) { alert('Erro: ' + e.message); }
 }
 
 // Fecha sidebar ao navegar (mobile)

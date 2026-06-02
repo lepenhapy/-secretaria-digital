@@ -24,3 +24,4 @@
 \i 024_categorias_inventario_inbox.sql
 \i 025_irmaos_cargo_loja.sql
 \i 026_irmaos_email.sql
+\i 027_usuarios_reset_token.sql
