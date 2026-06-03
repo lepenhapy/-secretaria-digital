@@ -938,7 +938,7 @@ class GenerateBillingInput(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "versao": "sd-v43-fix-startup"}
+    return {"status": "ok", "versao": "sd-v44-db-diag"}
 
 
 @app.get("/health/db")
@@ -949,6 +949,28 @@ def health_db(db=Depends(get_database)):
         return {"status": "ok", "db": "conectado"}
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Banco indisponível: {exc}")
+
+
+@app.get("/health/db-info")
+def health_db_info():
+    """Diagnóstico sem expor senhas."""
+    import re as _re
+    from backend_services.postgres_adapter import build_postgres_dsn
+    dsn = build_postgres_dsn()
+    # Mascara senha
+    dsn_safe = _re.sub(r"(:)[^:@]+(@)", r"\1*****\2", dsn)
+    dsn_safe = _re.sub(r"password=[^ ]+", "password=*****", dsn_safe)
+    has_db_url = bool(os.getenv("DATABASE_URL"))
+    has_sd_host = bool(os.getenv("SD_DB_HOST"))
+    # Testa conexão e retorna erro real
+    try:
+        import psycopg as _pg
+        conn = _pg.connect(dsn, connect_timeout=10)
+        conn.close()
+        return {"status": "ok", "dsn": dsn_safe, "DATABASE_URL": has_db_url, "SD_DB_HOST": has_sd_host}
+    except Exception as exc:
+        return {"status": "erro", "dsn": dsn_safe, "erro": str(exc),
+                "DATABASE_URL": has_db_url, "SD_DB_HOST": has_sd_host}
 
 
 class SetupAdminInput(BaseModel):

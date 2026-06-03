@@ -1,5 +1,6 @@
 import os
 import socket
+import threading
 from contextlib import contextmanager
 
 import psycopg
@@ -30,33 +31,38 @@ class PostgresDatabase:
     def __init__(self, dsn: str):
         self.dsn = dsn
         self._pool: ConnectionPool | None = None
+        self._lock = threading.Lock()
 
     def open(self):
-        if self._pool is None:
+        with self._lock:
+            if self._pool is not None:
+                return
             self._pool = ConnectionPool(
                 self.dsn,
                 min_size=1,
                 max_size=10,
                 kwargs={"row_factory": dict_row},
                 open=True,
+                reconnect_timeout=30,
+                connection_class=psycopg.Connection,
             )
 
     def close(self):
-        if self._pool:
-            self._pool.close()
-            self._pool = None
+        with self._lock:
+            if self._pool:
+                self._pool.close()
+                self._pool = None
 
     @contextmanager
     def transaction(self):
+        # Se pool não está pronto, tenta abrir (thread-safe)
         if self._pool is None:
-            # Pool ainda não pronto — tenta abrir e usar conexão direta
             try:
                 self.open()
-            except Exception:
-                pass
-            if self._pool is None:
-                # Último recurso: conexão direta sem pool
-                with psycopg.connect(self.dsn) as conn:
+            except Exception as exc:
+                # Pool falhou — usa conexão direta como fallback
+                print(f"[db] pool falhou, usando conexão direta: {exc}")
+                with psycopg.connect(self.dsn, connect_timeout=15) as conn:
                     with conn.transaction():
                         yield PostgresTransaction(conn)
                 return
@@ -77,14 +83,14 @@ def _resolve_ipv4(host: str, port: int) -> str:
 
 
 def build_postgres_dsn() -> str:
-    # Railway e outros PaaS fornecem DATABASE_URL diretamente
+    # Railway fornece DATABASE_URL automaticamente — tem prioridade absoluta
     database_url = os.getenv("DATABASE_URL", "").strip()
     if database_url:
-        # psycopg3 aceita postgresql:// mas não postgres://
         if database_url.startswith("postgres://"):
             database_url = "postgresql://" + database_url[len("postgres://"):]
         return database_url
 
+    # Fallback para variáveis manuais (SD_DB_*)
     host = os.getenv("SD_DB_HOST", "localhost")
     port = os.getenv("SD_DB_PORT", "5432")
     dbname = os.getenv("SD_DB_NAME", "secretaria_digital")
