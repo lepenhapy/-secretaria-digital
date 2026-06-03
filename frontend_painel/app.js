@@ -4035,6 +4035,7 @@ async function renderUsuariosView() {
   el.innerHTML = `
     <div class="view-header">
       <h1>Usuários</h1>
+      <span id="usuariosContador" style="font-size:13px;color:var(--muted)"></span>
     </div>
     <div id="usuariosLista"><div class="loading">Carregando…</div></div>`;
   await carregarUsuarios();
@@ -4044,12 +4045,16 @@ async function carregarUsuarios() {
   const isAdmin = state.usuario?.cargo === 'admin_principal';
   const url = isAdmin ? '/usuarios' : `/usuarios?loja_id=${state.usuario?.loja_id || 0}`;
   try {
-    const [lista, lojas] = await Promise.all([
-      api('GET', url),
-      isAdmin ? api('GET', '/lojas') : Promise.resolve([]),
-    ]);
+    // Lojas é opcional — não pode derrubar a lista de usuários se falhar
+    const lista = await api('GET', url);
+    let lojas = [];
+    if (isAdmin) {
+      try { lojas = await api('GET', '/lojas'); } catch(_) {}
+    }
     const lojaMap = Object.fromEntries(lojas.map(l => [l.id, l]));
     const el = document.getElementById('usuariosLista');
+    const contador = document.getElementById('usuariosContador');
+    if (contador) contador.textContent = `${lista.length} usuário(s)`;
     if (!lista.length) { el.innerHTML = '<p class="empty-msg">Nenhum usuário cadastrado.</p>'; return; }
     const semLoja = lista.filter(u => !u.loja_id);
     const aviso = semLoja.length

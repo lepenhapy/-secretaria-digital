@@ -16,6 +16,7 @@ class RegistrationService:
 
     def registrar(self, nome: str, nome_usuario: str, email: str, senha: str) -> None:
         with self.db.transaction() as tx:
+            # Verifica conta ativa
             if tx.fetch_one(
                 "select id from usuarios where email = %s and deleted_at is null",
                 [email],
@@ -28,17 +29,33 @@ class RegistrationService:
 
             email_ok = self.email.configurado()
             token = secrets.token_urlsafe(32) if email_ok else None
-            row = tx.fetch_one(
-                """
-                insert into usuarios
-                  (nome, email, senha_hash, cargo_id, ativo, email_confirmado, confirmacao_token)
-                values (%s, %s, %s, %s, %s, %s, %s)
-                returning id
-                """,
-                [nome, email, AuthService.hash_password(senha), cargo["id"],
-                 not email_ok, not email_ok, token],
+
+            # Verifica conta soft-deleted com mesmo e-mail — reativa em vez de criar nova
+            deleted = tx.fetch_one(
+                "select id from usuarios where email = %s and deleted_at is not null",
+                [email],
             )
-            usuario_id = row["id"]
+            if deleted:
+                tx.execute(
+                    """update usuarios set
+                         nome=%s, senha_hash=%s, cargo_id=%s,
+                         ativo=%s, email_confirmado=%s, confirmacao_token=%s,
+                         deleted_at=null, updated_at=now()
+                       where id=%s""",
+                    [nome, AuthService.hash_password(senha), cargo["id"],
+                     not email_ok, not email_ok, token, deleted["id"]],
+                )
+                usuario_id = deleted["id"]
+            else:
+                row = tx.fetch_one(
+                    """insert into usuarios
+                         (nome, email, senha_hash, cargo_id, ativo, email_confirmado, confirmacao_token)
+                       values (%s, %s, %s, %s, %s, %s, %s)
+                       returning id""",
+                    [nome, email, AuthService.hash_password(senha), cargo["id"],
+                     not email_ok, not email_ok, token],
+                )
+                usuario_id = row["id"]
 
             # Se já existe irmão com esse e-mail, vincula automaticamente
             irmao = tx.fetch_one(
