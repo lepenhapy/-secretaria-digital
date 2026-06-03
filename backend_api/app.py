@@ -776,17 +776,14 @@ async def lifespan(app_: FastAPI):
 
     db = get_database()
 
-    async def _init_db_background():
-        loop = asyncio.get_running_loop()
-        try:
-            await loop.run_in_executor(None, db.open)
-            await loop.run_in_executor(None, _ensure_schema, db)
-            print("[startup] banco inicializado com sucesso")
-        except Exception as exc:
-            print(f"[startup] erro DB: {exc}")
-
-    # Inicia DB em segundo plano — app responde imediatamente
-    asyncio.create_task(_init_db_background())
+    # Inicializa DB de forma síncrona — garante schema pronto antes de aceitar requests
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, db.open)
+        await loop.run_in_executor(None, _ensure_schema, db)
+        print("[startup] banco inicializado com sucesso")
+    except Exception as exc:
+        print(f"[startup] erro DB: {exc}")
 
     # Inicia o scheduler de tarefas diárias
     try:
@@ -1842,16 +1839,31 @@ def listar_usuarios(
         params: list = []
         if loja_id:
             cond += " AND u.loja_id=%s"; params.append(loja_id)
-        return tx.fetch_all(
+        rows = tx.fetch_all(
             f"""SELECT u.id, u.nome, u.email, u.ativo, u.email_confirmado,
-                       u.loja_id, c.nome AS cargo, u.created_at,
-                       i.id AS irmao_id
+                       u.loja_id, c.nome AS cargo, u.created_at
                 FROM usuarios u
                 JOIN cargos c ON c.id = u.cargo_id
-                LEFT JOIN irmaos i ON i.usuario_id = u.id AND i.deleted_at IS NULL
                 {cond} ORDER BY u.nome""",
             params,
         )
+        # Enriquece com irmao_id de forma segura (coluna pode não existir em DBs antigos)
+        try:
+            irmao_map = {
+                r["usuario_id"]: r["id"]
+                for r in tx.fetch_all(
+                    "SELECT id, usuario_id FROM irmaos WHERE usuario_id IS NOT NULL AND deleted_at IS NULL",
+                    [],
+                )
+            }
+            result = []
+            for r in rows:
+                d = dict(r)
+                d["irmao_id"] = irmao_map.get(r["id"])
+                result.append(d)
+            return result
+        except Exception:
+            return [dict(r) for r in rows]
 
 
 @app.put("/usuarios/{usuario_id}/ativar")
