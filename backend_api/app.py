@@ -776,14 +776,17 @@ async def lifespan(app_: FastAPI):
 
     db = get_database()
 
-    # Inicializa DB de forma síncrona — garante schema pronto antes de aceitar requests
-    loop = asyncio.get_event_loop()
-    try:
-        await loop.run_in_executor(None, db.open)
-        await loop.run_in_executor(None, _ensure_schema, db)
-        print("[startup] banco inicializado com sucesso")
-    except Exception as exc:
-        print(f"[startup] erro DB: {exc}")
+    async def _init_db():
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, db.open)
+            await loop.run_in_executor(None, _ensure_schema, db)
+            print("[startup] banco inicializado com sucesso")
+        except Exception as exc:
+            print(f"[startup] erro DB (tentará na primeira request): {exc}")
+
+    # Background: app responde imediatamente, schema aplica em paralelo
+    asyncio.create_task(_init_db())
 
     # Inicia o scheduler de tarefas diárias
     try:
@@ -935,7 +938,7 @@ class GenerateBillingInput(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "versao": "sd-v42-deploy-test"}
+    return {"status": "ok", "versao": "sd-v43-fix-startup"}
 
 
 @app.get("/health/db")

@@ -49,11 +49,17 @@ class PostgresDatabase:
     @contextmanager
     def transaction(self):
         if self._pool is None:
-            # Fallback: conexão direta (antes do pool estar pronto)
-            with psycopg.connect(self.dsn) as conn:
-                with conn.transaction():
-                    yield PostgresTransaction(conn)
-            return
+            # Pool ainda não pronto — tenta abrir e usar conexão direta
+            try:
+                self.open()
+            except Exception:
+                pass
+            if self._pool is None:
+                # Último recurso: conexão direta sem pool
+                with psycopg.connect(self.dsn) as conn:
+                    with conn.transaction():
+                        yield PostgresTransaction(conn)
+                return
 
         with self._pool.connection() as conn:
             with conn.transaction():
