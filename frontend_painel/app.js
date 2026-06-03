@@ -418,9 +418,11 @@ async function downloadComAuth(url, nome) {
 
 function abrirCadastro() {
   document.getElementById('modalCadastroOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
 }
 function fecharCadastro() {
   document.getElementById('modalCadastroOverlay').classList.remove('open');
+  document.body.style.overflow = '';
   document.getElementById('cadastroForm').style.display      = 'block';
   document.getElementById('cadastroConfirmado').style.display = 'none';
   document.getElementById('cadastroMsg').style.display = 'none';
@@ -519,10 +521,12 @@ function abrirRecuperarSenha() {
   const msg = document.getElementById('recuperarMsg');
   msg.style.display = 'none'; msg.textContent = '';
   document.getElementById('modalRecuperarOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
 }
 
 function fecharRecuperar() {
   document.getElementById('modalRecuperarOverlay').classList.remove('open');
+  document.body.style.overflow = '';
 }
 
 async function enviarRecuperacao() {
@@ -571,10 +575,12 @@ function abrirRedefinir(token) {
   const msg = document.getElementById('redefinirMsg');
   msg.style.display = 'none'; msg.textContent = '';
   document.getElementById('modalRedefinirOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
 }
 
 function fecharRedefinir() {
   document.getElementById('modalRedefinirOverlay').classList.remove('open');
+  document.body.style.overflow = '';
   const url = new URL(window.location.href);
   url.searchParams.delete('reset');
   window.history.replaceState({}, '', url.toString());
@@ -2708,6 +2714,7 @@ function abrirModal(fidOuTitulo, corpo, botoes) {
     `;
   }
   document.getElementById('modalOverlay').style.display = 'flex';
+  document.body.style.overflow = 'hidden'; // iOS: trava scroll do fundo
   if (typeof fidOuTitulo === 'string' && FUNCIONALIDADES[fidOuTitulo]?.initModal) {
     FUNCIONALIDADES[fidOuTitulo].initModal();
   }
@@ -2743,6 +2750,7 @@ async function executarModal() {
 
 function fecharModal() {
   document.getElementById('modalOverlay').style.display = 'none';
+  document.body.style.overflow = ''; // restaura scroll
   modalFuncId = null;
 }
 

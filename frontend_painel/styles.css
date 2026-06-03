@@ -345,9 +345,12 @@ body {
    MODAL
 ═══════════════════════════════════════════ */
 .modal-overlay {
-  display: none; position: fixed; inset: 0;
+  display: none; position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0; /* fallback iOS < 14.5 */
+  inset: 0;
   background: rgba(0,0,0,0.4); z-index: 500;
   align-items: center; justify-content: center;
+  -webkit-overflow-scrolling: touch;
 }
 .modal-overlay.open { display: flex; }
 .modal-box {
@@ -569,13 +572,21 @@ body {
 
 /* Overlay escuro quando sidebar aberta no mobile */
 .sidebar-overlay {
-  display: none; position: fixed; inset: 0;
+  display: none; position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0;
+  inset: 0;
   background: rgba(0,0,0,0.45); z-index: 150;
 }
 .sidebar-overlay.open { display: block; }
 
 @media (max-width: 768px) {
   :root { --sidebar-w: 0px; }
+
+  /* iOS Safari: impede zoom automático ao focar em inputs */
+  input, select, textarea,
+  .sb-input, .modal-input, .form-input, .form-select {
+    font-size: 16px !important;
+  }
 
   .hamburger { display: flex; }
 
