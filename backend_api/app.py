@@ -1731,8 +1731,7 @@ def recuperar_senha(
             (payload.email,),
         )
         if not user:
-            # Retorna mesmo resultado para não enumerar e-mails
-            return {"status": "sent"}
+            return {"status": "sent", "email_configurado": email_svc.configurado()}
         token = secrets.token_urlsafe(32)
         expiry = _dt.datetime.utcnow() + _dt.timedelta(hours=1)
         tx.execute(
@@ -1742,9 +1741,41 @@ def recuperar_senha(
     if email_svc.configurado():
         try:
             email_svc.send_reset_password(to_email=user["email"], nome=user["nome"], token=token)
-        except Exception:
-            pass
-    return {"status": "sent"}
+            return {"status": "sent", "email_configurado": True}
+        except Exception as exc:
+            # E-mail falhou — devolve o link para que o admin possa compartilhar
+            base_url = os.getenv("BASE_URL", "")
+            return {"status": "email_falhou", "link": f"{base_url}?reset={token}", "erro": str(exc)}
+    # E-mail não configurado — devolve o link para o admin compartilhar via WhatsApp
+    base_url = os.getenv("BASE_URL", "")
+    return {"status": "sem_email", "link": f"{base_url}?reset={token}"}
+
+
+@app.post("/usuarios/{usuario_id}/gerar-link-reset", status_code=200)
+def gerar_link_reset_admin(
+    usuario_id: int,
+    actor: Actor = Depends(get_current_actor),
+    db=Depends(get_database),
+):
+    """Admin gera um link de reset para qualquer usuário (sem precisar de e-mail)."""
+    import datetime as _dt
+    if actor.cargo != "admin_principal":
+        raise HTTPException(status_code=403, detail="Apenas admin pode gerar links de reset.")
+    with db.transaction() as tx:
+        user = tx.fetch_one(
+            "SELECT id, nome, email FROM usuarios WHERE id=%s AND deleted_at IS NULL",
+            (usuario_id,),
+        )
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        token = secrets.token_urlsafe(32)
+        expiry = _dt.datetime.utcnow() + _dt.timedelta(hours=24)
+        tx.execute(
+            "UPDATE usuarios SET reset_token=%s, reset_token_expiry=%s, updated_at=now() WHERE id=%s",
+            (token, expiry, usuario_id),
+        )
+    base_url = os.getenv("BASE_URL", "")
+    return {"link": f"{base_url}?reset={token}", "nome": user["nome"], "expira_em": "24 horas"}
 
 
 @app.post("/redefinir-senha", status_code=200)

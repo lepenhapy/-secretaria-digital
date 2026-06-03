@@ -532,9 +532,28 @@ async function enviarRecuperacao() {
   if (!email) { msg.style.display='block'; msg.className='modal-result error'; msg.textContent='Informe seu e-mail.'; return; }
   btn.disabled = true; btn.textContent = 'Enviando…';
   try {
-    await api('POST', '/recuperar-senha', { email });
-    document.getElementById('recuperarStep1').style.display = 'none';
-    document.getElementById('recuperarStep2').style.display = 'block';
+    const r = await api('POST', '/recuperar-senha', { email });
+    if (r.status === 'sem_email' || r.status === 'email_falhou') {
+      // E-mail não configurado no servidor — mostra o link para copiar
+      document.getElementById('recuperarStep1').style.display = 'none';
+      document.getElementById('recuperarStep2').style.display = 'block';
+      const corpo = document.querySelector('#recuperarStep2 .modal-body');
+      corpo.innerHTML = `
+        <div style="font-size:26px;text-align:center">🔗</div>
+        <div style="font-size:15px;font-weight:700;margin-top:10px;text-align:center">Link gerado</div>
+        <div style="color:#64748b;margin-top:6px;font-size:13px;line-height:1.5">
+          O e-mail automático não está ativo ainda.<br/>
+          Copie o link abaixo e envie para <strong>${email}</strong> via WhatsApp:
+        </div>
+        <div style="margin-top:12px;display:flex;gap:6px;align-items:center">
+          <input id="linkResetCopy" class="modal-input" value="${r.link}" readonly style="flex:1;font-size:11px"/>
+          <button class="func-btn primary" style="white-space:nowrap"
+            onclick="navigator.clipboard.writeText('${r.link}');this.textContent='Copiado!'">Copiar</button>
+        </div>`;
+    } else {
+      document.getElementById('recuperarStep1').style.display = 'none';
+      document.getElementById('recuperarStep2').style.display = 'block';
+    }
   } catch(e) {
     msg.style.display='block'; msg.className='modal-result error';
     msg.textContent = e.message || 'Erro ao enviar.';
@@ -4055,11 +4074,12 @@ async function carregarUsuarios() {
           </div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${isAdmin ? `<button class="func-btn neutral" style="font-size:12px;padding:4px 12px"
+            onclick="gerarLinkReset(${u.id},'${(u.nome||'').replace(/'/g,'')}')">🔑 Reset senha</button>` : ''}
           ${isAdmin && !u.loja_id ? `<button class="func-btn neutral" style="font-size:12px;padding:4px 12px"
             onclick="vincularUsuarioLoja(${u.id})">🏛 Vincular Loja</button>` : ''}
           ${isAdmin && semIrmao && u.loja_id ? `<button class="func-btn primary" style="font-size:12px;padding:4px 12px"
             onclick="criarPerfilIrmao(${u.id},'${(u.nome||'').replace(/'/g,'')}','${(u.email||'').replace(/'/g,'')}',${u.loja_id})">👤 Criar perfil</button>` : ''}
-          ${isAdmin && !u.loja_id ? '' : ''}
           ${!u.ativo ? `<button class="func-btn primary" style="font-size:12px;padding:4px 12px"
             onclick="ativarUsuario(${u.id})">✓ Ativar</button>` : ''}
           ${(isAdmin || u.id === state.usuario?.user_id) ? `<button class="func-btn danger" style="font-size:12px;padding:4px 12px"
@@ -4081,6 +4101,28 @@ async function excluirUsuario(id, nome) {
   if (!confirm(`Excluir o usuário "${nome}"? Esta ação não pode ser desfeita.`)) return;
   try { await api('DELETE', `/usuarios/${id}`); carregarUsuarios(); }
   catch(e) { alert('Erro: ' + e.message); }
+}
+
+async function gerarLinkReset(usuarioId, nome) {
+  try {
+    const r = await api('POST', `/usuarios/${usuarioId}/gerar-link-reset`);
+    abrirModal(`🔑 Link de reset — ${r.nome}`, `
+      <div style="font-size:13px;color:#64748b;margin-bottom:12px;line-height:1.5">
+        Envie este link para <strong>${r.nome}</strong> via WhatsApp.<br/>
+        Ele expira em <strong>${r.expira_em}</strong>.
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input class="modal-input" id="linkResetAdmin" value="${r.link}" readonly style="flex:1;font-size:11px"/>
+        <button class="func-btn primary" style="white-space:nowrap"
+          onclick="navigator.clipboard.writeText(document.getElementById('linkResetAdmin').value);this.textContent='Copiado!'">
+          Copiar
+        </button>
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:#64748b">
+        Ou abra direto: <a href="${r.link}" target="_blank" style="color:#2563eb">abrir link</a>
+      </div>`,
+    [{ label: 'Fechar', cls: 'neutral', action: 'fecharModal()' }]);
+  } catch(e) { alert('Erro: ' + e.message); }
 }
 
 async function criarPerfilIrmao(usuarioId, nome, email, lojaId) {
