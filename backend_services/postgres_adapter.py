@@ -88,6 +88,10 @@ def build_postgres_dsn() -> str:
     if database_url:
         if database_url.startswith("postgres://"):
             database_url = "postgresql://" + database_url[len("postgres://"):]
+        # Railway interno não usa SSL — psycopg3 tenta SSL por padrão e quebra
+        if "railway.internal" in database_url and "sslmode" not in database_url:
+            sep = "&" if "?" in database_url else "?"
+            database_url += f"{sep}sslmode=disable"
         return database_url
 
     # Fallback para variáveis manuais (SD_DB_*)
