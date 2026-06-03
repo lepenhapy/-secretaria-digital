@@ -1430,23 +1430,24 @@ async function editarIrmao(id) {
   let ir, lojasList = [];
   try { ir = await api('GET', `/irmaos/${id}`); }
   catch(e) { alert('Erro ao carregar: ' + e.message); return; }
-  const isAdmin = ['admin_principal','veneravel_mestre'].includes(state.usuario?.cargo);
   const isOwnProfile = ir.usuario_id === state.usuario?.user_id;
-  const podeVerLoja  = isAdmin || (isOwnProfile && state.usuario?.loja_tipo === 'complexo');
-  if (podeVerLoja) {
-    try { lojasList = await api('GET', '/lojas'); } catch(_) {}
+  // Qualquer usuário pode ver e alterar a loja do irmão
+  try { lojasList = await api('GET', '/lojas'); } catch(_) {}
+  // Fallback: buscar lojas públicas se /lojas falhou (não autenticado)
+  if (!lojasList.length) {
+    try { lojasList = await fetch('/lojas/publico').then(r=>r.json()); } catch(_) {}
   }
   const filhosStr = (ir.filhos || []).map(f =>
     f.nome + (f.data_nascimento ? ' / ' + f.data_nascimento : '')
   ).join('\n');
-  const lojaField = podeVerLoja && lojasList.length
+  const lojaField = lojasList.length
     ? `<div class="form-group" style="grid-column:1/-1"><label>Loja</label>
         <select class="modal-input" id="ei_loja_id">
           ${lojasList.filter(l=>l.tipo!=='complexo').map(l=>`<option value="${l.id}" ${l.id===ir.loja_id?'selected':''}>${l.nome}${l.numero?' nº'+l.numero:''}</option>`).join('')}
         </select>
         ${isOwnProfile && !state.usuario?.loja_id ? '<div style="font-size:11px;color:#0284c7;margin-top:4px">⚡ Ao salvar, sua conta também será vinculada a esta loja.</div>' : ''}
         </div>`
-    : `<input type="hidden" id="ei_loja_id" value="${ir.loja_id}" />`;
+    : `<input type="hidden" id="ei_loja_id" value="${ir.loja_id||''}" />`;
   const campoUsuarioId = `<input type="hidden" id="ei_usuario_id" value="${ir.usuario_id||''}" />`;
   abrirModal(`Editar — ${ir.nome}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -1521,12 +1522,15 @@ async function salvarEdicaoIrmao(id) {
   };
   try {
     await api('PUT', `/irmaos/${id}`, dados);
-    // Se editando o próprio perfil e sem loja vinculada, sincroniza a conta
+    // Sincroniza loja do usuário vinculado se ele não tiver loja ainda
     const irmaoUserId = +document.getElementById('ei_usuario_id')?.value || 0;
-    if (irmaoUserId && irmaoUserId === state.usuario?.user_id && !state.usuario?.loja_id) {
+    if (irmaoUserId && lojaId) {
       try {
-        await api('PUT', `/usuarios/${state.usuario.user_id}/loja`, { loja_id: lojaId });
-        state.usuario.loja_id = lojaId;
+        await api('PUT', `/usuarios/${irmaoUserId}/loja`, { loja_id: lojaId });
+        if (irmaoUserId === state.usuario?.user_id) {
+          state.usuario.loja_id = lojaId;
+          localStorage.setItem('sd_usuario', JSON.stringify(state.usuario));
+        }
       } catch(_) {}
     }
     fecharModal();

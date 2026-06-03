@@ -86,7 +86,7 @@ class EmailService:
         self._send(to_email, nome, subject, html, body_text)
 
     def send_reset_password(self, to_email: str, nome: str, token: str) -> None:
-        link = f"{self.base_url}?reset={token}"
+        link = f"{self.base_url}/painel?reset={token}"
         html = f"""
         <html><body style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px">
           <div style="text-align:center;margin-bottom:24px">

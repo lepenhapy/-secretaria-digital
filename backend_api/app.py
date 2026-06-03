@@ -826,21 +826,18 @@ app.add_middleware(
 )
 
 _frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend_painel")
-if os.path.isdir(_frontend_dir):
-    app.mount("/painel/static", StaticFiles(directory=_frontend_dir), name="frontend_static")
 
 
-@app.get("/painel/index.html", response_class=HTMLResponse)
-@app.get("/painel/", response_class=HTMLResponse)
-@app.get("/painel", response_class=HTMLResponse)
+@app.get("/painel/index.html")
+@app.get("/painel/")
+@app.get("/painel")
 def serve_painel():
-    """Serve o index.html sem cache para garantir que o browser sempre busque a versão nova."""
+    """Serve index.html sem cache — rotas explícitas têm prioridade sobre o mount."""
     import pathlib
+    from fastapi.responses import Response as _Resp
     p = pathlib.Path(_frontend_dir) / "index.html"
-    content = p.read_text(encoding="utf-8")
-    from fastapi.responses import Response
-    return Response(
-        content=content,
+    return _Resp(
+        content=p.read_text(encoding="utf-8"),
         media_type="text/html",
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -850,9 +847,16 @@ def serve_painel():
     )
 
 
+# Mount APÓS as rotas explícitas — serve app.js, styles.css, etc.
+if os.path.isdir(_frontend_dir):
+    app.mount("/painel", StaticFiles(directory=_frontend_dir), name="frontend")
+
+
 @app.get("/", response_class=HTMLResponse)
-def root_redirect():
-    return '<meta http-equiv="refresh" content="0; url=/painel">'
+def root_redirect(request: Request):
+    qs = str(request.url.query)
+    target = f"/painel?{qs}" if qs else "/painel"
+    return f'<meta http-equiv="refresh" content="0; url={target}">'
 
 
 class CreateContractInput(BaseModel):
@@ -1765,10 +1769,10 @@ def recuperar_senha(
         except Exception as exc:
             # E-mail falhou — devolve o link para que o admin possa compartilhar
             base_url = os.getenv("BASE_URL", "")
-            return {"status": "email_falhou", "link": f"{base_url}?reset={token}", "erro": str(exc)}
+            return {"status": "email_falhou", "link": f"{base_url}/painel?reset={token}", "erro": str(exc)}
     # E-mail não configurado — devolve o link para o admin compartilhar via WhatsApp
     base_url = os.getenv("BASE_URL", "")
-    return {"status": "sem_email", "link": f"{base_url}?reset={token}"}
+    return {"status": "sem_email", "link": f"{base_url}/painel?reset={token}"}
 
 
 @app.post("/usuarios/{usuario_id}/gerar-link-reset", status_code=200)
@@ -1795,7 +1799,7 @@ def gerar_link_reset_admin(
             (token, expiry, usuario_id),
         )
     base_url = os.getenv("BASE_URL", "")
-    return {"link": f"{base_url}?reset={token}", "nome": user["nome"], "expira_em": "24 horas"}
+    return {"link": f"{base_url}/painel?reset={token}", "nome": user["nome"], "expira_em": "24 horas"}
 
 
 @app.post("/redefinir-senha", status_code=200)
