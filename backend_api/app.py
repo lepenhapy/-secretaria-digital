@@ -827,12 +827,32 @@ app.add_middleware(
 
 _frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend_painel")
 if os.path.isdir(_frontend_dir):
-    app.mount("/painel", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
+    app.mount("/painel/static", StaticFiles(directory=_frontend_dir), name="frontend_static")
+
+
+@app.get("/painel/index.html", response_class=HTMLResponse)
+@app.get("/painel/", response_class=HTMLResponse)
+@app.get("/painel", response_class=HTMLResponse)
+def serve_painel():
+    """Serve o index.html sem cache para garantir que o browser sempre busque a versão nova."""
+    import pathlib
+    p = pathlib.Path(_frontend_dir) / "index.html"
+    content = p.read_text(encoding="utf-8")
+    from fastapi.responses import Response
+    return Response(
+        content=content,
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
 def root_redirect():
-    return '<meta http-equiv="refresh" content="0; url=/painel/index.html">'
+    return '<meta http-equiv="refresh" content="0; url=/painel">'
 
 
 class CreateContractInput(BaseModel):
