@@ -938,7 +938,7 @@ class GenerateBillingInput(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "versao": "sd-v45-ssl-fix"}
+    return {"status": "ok", "versao": "sd-v46-revert-ssl"}
 
 
 @app.get("/health/db")
