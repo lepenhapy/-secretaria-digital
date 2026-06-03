@@ -81,25 +81,24 @@ def _resolve_ipv4(host: str, port: int) -> str:
 
 
 def build_postgres_dsn() -> str:
-    # Railway fornece DATABASE_URL automaticamente — tem prioridade absoluta
+    # SD_DB_HOST tem prioridade — permite apontar para Supabase ou outro banco externo
+    host = os.getenv("SD_DB_HOST", "").strip()
+    if host:
+        port     = os.getenv("SD_DB_PORT", "5432")
+        dbname   = os.getenv("SD_DB_NAME", "postgres")
+        user     = os.getenv("SD_DB_USER", "postgres")
+        password = os.getenv("SD_DB_PASSWORD", "")
+        hostaddr = _resolve_ipv4(host, int(port))
+        extras   = f"hostaddr={hostaddr} sslmode=require gssencmode=disable"
+        if password:
+            return f"host={host} port={port} dbname={dbname} user={user} password={password} {extras}"
+        return f"host={host} port={port} dbname={dbname} user={user} {extras}"
+
+    # Fallback: DATABASE_URL do Railway (somente se SD_DB_HOST não estiver definido)
     database_url = os.getenv("DATABASE_URL", "").strip()
     if database_url:
         if database_url.startswith("postgres://"):
             database_url = "postgresql://" + database_url[len("postgres://"):]
-        # NÃO adicionar sslmode — o psycopg3 usa 'prefer' por padrão,
-        # que funciona com o Railway interno (H → fallback para plain)
         return database_url
 
-    # Fallback para variáveis manuais (SD_DB_*)
-    host = os.getenv("SD_DB_HOST", "localhost")
-    port = os.getenv("SD_DB_PORT", "5432")
-    dbname = os.getenv("SD_DB_NAME", "secretaria_digital")
-    user = os.getenv("SD_DB_USER", "postgres")
-    password = os.getenv("SD_DB_PASSWORD", "")
-
-    hostaddr = _resolve_ipv4(host, int(port))
-    extras = f"hostaddr={hostaddr} sslmode=require gssencmode=disable"
-
-    if password:
-        return f"host={host} port={port} dbname={dbname} user={user} password={password} {extras}"
-    return f"host={host} port={port} dbname={dbname} user={user} {extras}"
+    return "postgresql://localhost/secretaria_digital"
